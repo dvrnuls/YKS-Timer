@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Project Structure
         run: |
@@ -24,13 +24,6 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxhdpi
           mkdir -p app/src/main/res/mipmap-xxxhdpi
           mkdir -p gradle/wrapper
-
-          # Minimal placeholder launcher icons (so aapt won't fail)
-          ICON_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Xo0cAAAAASUVORK5CYII="
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            echo "$ICON_B64" | base64 -d > "app/src/main/res/$d/ic_launcher.png"
-            echo "$ICON_B64" | base64 -d > "app/src/main/res/$d/ic_launcher_round.png"
-          done
 
           # Create build.gradle (root)
           cat > build.gradle << 'EOFROOT'
@@ -240,7 +233,7 @@ jobs:
           }
           EOFMAIN
 
-          # Create TimerService.kt  (compile fix: remove this.intent usage, preserve behavior)
+          # Create TimerService.kt  (NOT: burada senin içeriğin aynen bırakıldı)
           cat > app/src/main/java/com/yks/timer/TimerService.kt << 'EOFSERVICE'
           package com.yks.timer
 
@@ -262,7 +255,6 @@ jobs:
               private var redScreenView: View? = null
               private var countDownTimer: CountDownTimer? = null
               private var totalSeconds: Long = 60
-              private var initialSeconds: Long = 60
               private var isPaused = false
 
               override fun onBind(intent: Intent?): IBinder? = null
@@ -275,13 +267,9 @@ jobs:
               }
 
               override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  initialSeconds = (intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
-                  totalSeconds = initialSeconds
+                  totalSeconds = (intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
                   if (overlayView == null) {
                       showOverlay()
-                  } else {
-                      updateTimerDisplay()
-                      updateButtons()
                   }
                   return START_STICKY
               }
@@ -356,7 +344,7 @@ jobs:
               private fun resetTimer() {
                   countDownTimer?.cancel()
                   isPaused = true
-                  totalSeconds = initialSeconds
+                  totalSeconds = (this.intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
                   updateTimerDisplay()
                   updateButtons()
               }
@@ -365,7 +353,7 @@ jobs:
                   overlayView?.findViewById<Button>(R.id.btnNext)?.isEnabled = false
                   android.os.Handler(mainLooper).postDelayed({
                       countDownTimer?.cancel()
-                      totalSeconds = initialSeconds
+                      totalSeconds = (this.intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
                       updateTimerDisplay()
                       startTimer()
                       overlayView?.findViewById<Button>(R.id.btnNext)?.isEnabled = true
@@ -407,7 +395,7 @@ jobs:
                   redScreenView?.findViewById<Button>(R.id.btnSkip)?.isEnabled = false
                   android.os.Handler(mainLooper).postDelayed({
                       hideRedScreen()
-                      totalSeconds = initialSeconds
+                      totalSeconds = (this.intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
                       startTimer()
                   }, 2000)
               }
@@ -675,18 +663,6 @@ jobs:
           </FrameLayout>
           EOFRED
 
-          # Create gradlew (fixed to actually run wrapper jar)
-          cat > gradlew << 'EOFGRADLEW'
-          #!/bin/sh
-          APP_HOME="$(cd "$(dirname "$0")" && pwd)"
-          JAVA_CMD="${JAVA_HOME:-}/bin/java"
-          if [ ! -x "$JAVA_CMD" ]; then
-            JAVA_CMD=java
-          fi
-          exec "$JAVA_CMD" -jar "$APP_HOME/gradle/wrapper/gradle-wrapper.jar" "$@"
-          EOFGRADLEW
-          chmod +x gradlew
-
           # Create gradle-wrapper.properties
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOFWRAPPER'
           distributionBase=GRADLE_USER_HOME
@@ -696,11 +672,27 @@ jobs:
           zipStorePath=wrapper/dists
           EOFWRAPPER
 
-          # Download gradle-wrapper.jar
+          # Download gradle-wrapper.jar (same as you had)
           curl -L https://raw.githubusercontent.com/gradle/gradle/v8.0.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
 
+          # Create gradlew (FIXED: run wrapper via classpath + GradleWrapperMain)
+          cat > gradlew << 'EOFGRADLEW'
+          #!/bin/sh
+          set -e
+          APP_HOME="$(cd "$(dirname "$0")" && pwd)"
+          CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
+
+          JAVA_CMD="${JAVA_HOME}/bin/java"
+          if [ ! -x "$JAVA_CMD" ]; then
+            JAVA_CMD=java
+          fi
+
+          exec "$JAVA_CMD" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+          EOFGRADLEW
+          chmod +x gradlew
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -714,3 +706,4 @@ jobs:
         with:
           name: YKS-Timer-APK
           path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
