@@ -18,65 +18,61 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # IMPORTANT: do NOT enable Gradle cache here (repo may be empty)
       - name: Install Gradle
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           GRADLE_VERSION="8.2"
           curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
           unzip -q gradle.zip
           echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
-      - name: Generate project (repo can be empty)
+      - name: Generate Android project (no INTERNET permission, no 3rd-party libs)
         shell: bash
         run: |
           set -euo pipefail
-          export LANG=C.UTF-8
-          export LC_ALL=C.UTF-8
-
-          mkdir -p app/src/main/java/com/yks/timer
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
-
-          # Valid PNG icons (AAPT2-safe)
           python3 - <<'PY'
-          import os, struct, zlib, binascii
-          def png_bytes(w, h, rgba):
-              raw = b''.join((b'\x00' + rgba * w) for _ in range(h))
+          from pathlib import Path
+
+          def w(path: str, content: str):
+              p = Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(content, encoding="utf-8")
+
+          # AAPT2-safe launcher icons (solid PNG)
+          def write_png(path: str, wpx: int=48, hpx: int=48, rgba=(25,118,210,255)):
+              import os, struct, zlib, binascii
+              r,g,b,a = rgba
+              raw = b"".join((b"\x00" + bytes([r,g,b,a]) * wpx) for _ in range(hpx))
               comp = zlib.compress(raw, 9)
               def chunk(tag, data):
                   return (struct.pack(">I", len(data)) + tag + data +
                           struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
-              sig = b'\x89PNG\r\n\x1a\n'
-              ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
-              return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', comp) + chunk(b'IEND', b'')
-          data = png_bytes(48, 48, bytes([25, 118, 210, 255]))
-          dirs = [
+              sig = b"\x89PNG\r\n\x1a\n"
+              ihdr = struct.pack(">IIBBBBB", wpx, hpx, 8, 6, 0, 0, 0)
+              data = sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", comp) + chunk(b"IEND", b"")
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "wb") as f:
+                  f.write(data)
+
+          for d in [
               "app/src/main/res/mipmap-mdpi",
               "app/src/main/res/mipmap-hdpi",
               "app/src/main/res/mipmap-xhdpi",
               "app/src/main/res/mipmap-xxhdpi",
               "app/src/main/res/mipmap-xxxhdpi",
-          ]
-          for d in dirs:
-              os.makedirs(d, exist_ok=True)
-              for name in ("ic_launcher.png", "ic_launcher_round.png"):
-                  with open(os.path.join(d, name), "wb") as f:
-                      f.write(data)
-          PY
+          ]:
+              write_png(f"{d}/ic_launcher.png")
+              write_png(f"{d}/ic_launcher_round.png")
 
-          cat > build.gradle << 'EOF'
+          w("build.gradle", """\
           plugins {
               id 'com.android.application' version '8.2.2' apply false
           }
-          EOF
+          """)
 
-          cat > settings.gradle << 'EOF'
+          w("settings.gradle", """\
           pluginManagement {
               repositories {
                   google()
@@ -93,15 +89,15 @@ jobs:
           }
           rootProject.name = "YKS-Timer"
           include ':app'
-          EOF
+          """)
 
-          cat > gradle.properties << 'EOF'
+          w("gradle.properties", """\
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=false
           android.enableJetifier=false
-          EOF
+          """)
 
-          cat > app/build.gradle << 'EOF'
+          w("app/build.gradle", """\
           plugins { id 'com.android.application' }
 
           android {
@@ -130,9 +126,9 @@ jobs:
           dependencies {
               // No third-party libs. No networking libs.
           }
-          EOF
+          """)
 
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          w("app/src/main/AndroidManifest.xml", """\
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -166,9 +162,9 @@ jobs:
               </application>
 
           </manifest>
-          EOF
+          """)
 
-          cat > app/src/main/res/values/strings.xml << 'EOF'
+          w("app/src/main/res/values/strings.xml", """\
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">YKS Sayaç</string>
@@ -186,9 +182,9 @@ jobs:
               <string name="time_up">SÜRE DOLDU!</string>
               <string name="skip">Soruyu Geç</string>
           </resources>
-          EOF
+          """)
 
-          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          w("app/src/main/res/layout/activity_main.xml", """\
           <?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
@@ -298,9 +294,9 @@ jobs:
                       android:layout_marginTop="16dp"/>
               </LinearLayout>
           </ScrollView>
-          EOF
+          """)
 
-          cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
+          w("app/src/main/res/layout/overlay_timer.xml", """\
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:id="@+id/rootOverlay"
@@ -375,9 +371,9 @@ jobs:
 
               </LinearLayout>
           </FrameLayout>
-          EOF
+          """)
 
-          cat > app/src/main/res/layout/red_screen.xml << 'EOF'
+          w("app/src/main/res/layout/red_screen.xml", """\
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
@@ -408,9 +404,9 @@ jobs:
                       android:text="@string/skip"/>
               </LinearLayout>
           </FrameLayout>
-          EOF
+          """)
 
-          cat > app/src/main/java/com/yks/timer/MainActivity.java << 'EOF'
+          w("app/src/main/java/com/yks/timer/MainActivity.java", """\
           package com.yks.timer;
 
           import android.Manifest;
@@ -549,9 +545,9 @@ jobs:
                   return v;
               }
           }
-          EOF
+          """)
 
-          cat > app/src/main/java/com/yks/timer/TimerService.java << 'EOF'
+          w("app/src/main/java/com/yks/timer/TimerService.java", """\
           package com.yks.timer;
 
           import android.app.Notification;
@@ -711,11 +707,9 @@ jobs:
 
                       overlayView.post(() -> {
                           if (overlayView == null || overlayContent == null) return;
-
                           baseContentW = overlayContent.getWidth();
                           baseContentH = overlayContent.getHeight();
                           baseHandleH  = dragHandle.getHeight();
-
                           applyScaleOnlyKeepWindowBig();
                           clampOverlayToScreen();
                       });
@@ -809,7 +803,7 @@ jobs:
               }
 
               // Keep window big (unscaled) so nothing clips.
-              // Then, when the window is at right/bottom edges, shift content inside so VISIBLE part reaches the edge.
+              // Then, when window is at right/bottom edges, shift content inside so VISIBLE part reaches the edge.
               private void applyScaleOnlyKeepWindowBig() {
                   if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
@@ -844,7 +838,7 @@ jobs:
               }
 
               private void updateEdgeAnchors() {
-                  if (overlayContent == null || overlayParams == null) return;
+                  if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
                   int[] wh = getScreenSize();
                   int screenW = wh[0];
@@ -857,27 +851,25 @@ jobs:
                   int maxX = Math.max(0, screenW - w);
                   int maxY = Math.max(0, screenH - h);
 
-                  float scale = sizePercent / 100.0f;
-                  if (scale <= 0f) scale = 1f;
+                  // usable inner area (exclude rootOverlay padding)
+                  int padL = overlayView.getPaddingLeft();
+                  int padR = overlayView.getPaddingRight();
+                  int padT = overlayView.getPaddingTop();
+                  int padB = overlayView.getPaddingBottom();
 
-                  if (lastScaledW <= 0 || lastScaledH <= 0) {
-                      lastScaledW = (int) Math.ceil(baseContentW * scale);
-                      lastScaledH = (int) Math.ceil(baseContentH * scale);
-                  }
+                  int usableW = Math.max(1, w - padL - padR);
+                  int usableH = Math.max(1, h - padT - padB);
 
-                  int extraW = Math.max(0, w - baseContentW);
-                  int extraH = Math.max(0, h - baseContentH);
-
-                  int dx = Math.max(0, baseContentW - lastScaledW) + extraW;
-                  int dy = Math.max(0, baseContentH - lastScaledH) + extraH;
+                  int txMax = Math.max(0, usableW - lastScaledW);
+                  int tyMax = Math.max(0, usableH - lastScaledH);
 
                   int tol = dp(2);
 
                   float tx = 0f;
                   float ty = 0f;
 
-                  if (overlayParams.x >= (maxX - tol)) tx = dx;
-                  if (overlayParams.y >= (maxY - tol)) ty = dy;
+                  if (overlayParams.x >= (maxX - tol)) tx = txMax;
+                  if (overlayParams.y >= (maxY - tol)) ty = tyMax;
 
                   overlayContent.setTranslationX(tx);
                   overlayContent.setTranslationY(ty);
@@ -1134,7 +1126,7 @@ jobs:
                   return v;
               }
           }
-          EOF
+          PY
 
       - name: Build Debug APK (installable)
         run: gradle :app:assembleDebug --no-daemon
