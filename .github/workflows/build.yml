@@ -1,4 +1,4 @@
-name: Build APK (Offline App)
+name: Build Offline APK
 
 on:
   push:
@@ -12,12 +12,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate Android project (no-internet app)
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install Gradle (official distribution)
+        shell: bash
+        run: |
+          set -e
+          GRADLE_VERSION="8.2"
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q gradle.zip
+          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Generate project (repo can be empty)
         shell: bash
         run: |
           set -euo pipefail
 
-          # --- Project structure ---
+          # --- Structure ---
           mkdir -p app/src/main/java/com/yks/timer
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
@@ -26,14 +42,13 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xhdpi
           mkdir -p app/src/main/res/mipmap-xxhdpi
           mkdir -p app/src/main/res/mipmap-xxxhdpi
-          mkdir -p gradle/wrapper
 
-          # --- Create VALID PNG launcher icons (AAPT2-safe) via python (no external libs) ---
+          # --- VALID PNG icons (AAPT2-safe), no external libs ---
           python3 - <<'PY'
           import os, struct, zlib, binascii
 
           def png_bytes(w, h, rgba):
-              raw = b''.join((b'\x00' + rgba * w) for _ in range(h))  # filter byte 0 each row
+              raw = b''.join((b'\x00' + rgba * w) for _ in range(h))
               comp = zlib.compress(raw, 9)
 
               def chunk(tag, data):
@@ -41,12 +56,10 @@ jobs:
                           struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
 
               sig = b'\x89PNG\r\n\x1a\n'
-              ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)  # 8-bit RGBA
+              ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
               return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', comp) + chunk(b'IEND', b'')
 
-          # 48x48 solid blue icon
           data = png_bytes(48, 48, bytes([25, 118, 210, 255]))
-
           dirs = [
               "app/src/main/res/mipmap-mdpi",
               "app/src/main/res/mipmap-hdpi",
@@ -61,15 +74,14 @@ jobs:
                       f.write(data)
           PY
 
-          # --- Gradle (root) ---
-          cat > build.gradle << 'EOFROOT'
+          # --- Gradle files ---
+          cat > build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.2.2' apply false
-              id 'org.jetbrains.kotlin.android' version '1.9.22' apply false
           }
-          EOFROOT
+          EOF
 
-          cat > settings.gradle << 'EOFSETTINGS'
+          cat > settings.gradle << 'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -86,20 +98,17 @@ jobs:
           }
           rootProject.name = "YKS-Timer"
           include ':app'
-          EOFSETTINGS
+          EOF
 
-          cat > gradle.properties << 'EOFPROPS'
+          cat > gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=false
           android.enableJetifier=false
-          kotlin.code.style=official
-          EOFPROPS
+          EOF
 
-          # --- App Gradle ---
-          cat > app/build.gradle << 'EOFAPP'
+          cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
           }
 
           android {
@@ -115,38 +124,31 @@ jobs:
               }
 
               buildTypes {
-                  debug {
-                      debuggable true
-                  }
-                  release {
-                      minifyEnabled false
-                  }
+                  debug { debuggable true }
+                  release { minifyEnabled false }
               }
 
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
-
-              kotlinOptions {
-                  jvmTarget = '1.8'
-              }
           }
 
           dependencies {
-              // Intentionally empty: no third-party UI libs, no networking libs.
+              // No third-party libs. No networking libs.
           }
-          EOFAPP
+          EOF
 
-          # --- AndroidManifest (NO INTERNET permission) ---
-          cat > app/src/main/AndroidManifest.xml << 'EOFMANIFEST'
+          # --- AndroidManifest: NO INTERNET permission + correct FGS type/permission ---
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-              <!-- Overlay + Foreground service -->
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <!-- Intentionally NO android.permission.INTERNET -->
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <!-- IMPORTANT: No INTERNET permission on purpose -->
 
               <application
                   android:allowBackup="true"
@@ -167,22 +169,23 @@ jobs:
 
                   <service
                       android:name=".TimerService"
-                      android:exported="false" />
+                      android:exported="false"
+                      android:foregroundServiceType="dataSync" />
               </application>
 
           </manifest>
-          EOFMANIFEST
+          EOF
 
           # --- strings.xml ---
-          cat > app/src/main/res/values/strings.xml << 'EOFSTR'
+          cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">YKS Sayaç</string>
           </resources>
-          EOFSTR
+          EOF
 
-          # --- activity_main.xml (simple UI, no Material/AndroidX) ---
-          cat > app/src/main/res/layout/activity_main.xml << 'EOFACT'
+          # --- activity_main.xml ---
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
@@ -257,10 +260,10 @@ jobs:
                   android:text="Durum: Hazır"
                   android:layout_marginTop="16dp"/>
           </LinearLayout>
-          EOFACT
+          EOF
 
           # --- overlay_timer.xml ---
-          cat > app/src/main/res/layout/overlay_timer.xml << 'EOFOVER'
+          cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="wrap_content"
@@ -318,10 +321,10 @@ jobs:
                       android:layout_marginStart="6dp"/>
               </LinearLayout>
           </LinearLayout>
-          EOFOVER
+          EOF
 
           # --- red_screen.xml ---
-          cat > app/src/main/res/layout/red_screen.xml << 'EOFRED'
+          cat > app/src/main/res/layout/red_screen.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
@@ -352,357 +355,353 @@ jobs:
                       android:text="Soruyu Geç (2 sn)"/>
               </LinearLayout>
           </FrameLayout>
-          EOFRED
+          EOF
 
-          # --- MainActivity.kt (no AppCompat/AndroidX) ---
-          cat > app/src/main/java/com/yks/timer/MainActivity.kt << 'EOFMAIN'
-          package com.yks.timer
+          # --- MainActivity.java ---
+          cat > app/src/main/java/com/yks/timer/MainActivity.java << 'EOF'
+          package com.yks.timer;
 
-          import android.app.Activity
-          import android.content.Intent
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.widget.Button
-          import android.widget.EditText
-          import android.widget.TextView
-          import android.widget.Toast
+          import android.Manifest;
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.TextView;
+          import android.widget.Toast;
 
-          class MainActivity : Activity() {
+          public class MainActivity extends Activity {
 
-              private val REQUEST_CODE_OVERLAY = 1001
+              private static final int REQ_OVERLAY = 1001;
+              private static final int REQ_NOTIF = 1002;
 
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_main)
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setContentView(R.layout.activity_main);
 
-                  val minutesEt = findViewById<EditText>(R.id.timeMinutes)
-                  val secondsEt = findViewById<EditText>(R.id.timeSeconds)
-                  val statusTv = findViewById<TextView>(R.id.tvStatus)
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                          requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+                      }
+                  }
 
-                  findViewById<Button>(R.id.btnStart).setOnClickListener {
+                  final EditText minutesEt = findViewById(R.id.timeMinutes);
+                  final EditText secondsEt = findViewById(R.id.timeSeconds);
+                  final TextView statusTv = findViewById(R.id.tvStatus);
+
+                  Button startBtn = findViewById(R.id.btnStart);
+                  Button stopBtn = findViewById(R.id.btnStop);
+
+                  startBtn.setOnClickListener(v -> {
                       if (!checkOverlayPermission()) {
-                          requestOverlayPermission()
-                          return@setOnClickListener
+                          requestOverlayPermission();
+                          return;
                       }
 
-                      val minutes = minutesEt.text.toString().toIntOrNull() ?: 0
-                      val seconds = secondsEt.text.toString().toIntOrNull() ?: 0
-                      val totalSeconds = minutes * 60 + seconds
+                      int minutes = 0, seconds = 0;
+                      try { minutes = Integer.parseInt(minutesEt.getText().toString().trim()); } catch (Exception ignored) {}
+                      try { seconds = Integer.parseInt(secondsEt.getText().toString().trim()); } catch (Exception ignored) {}
 
+                      int totalSeconds = minutes * 60 + seconds;
                       if (totalSeconds <= 0) {
-                          Toast.makeText(this, "Lütfen geçerli bir süre girin", Toast.LENGTH_SHORT).show()
-                          return@setOnClickListener
+                          Toast.makeText(this, "Lütfen geçerli bir süre girin", Toast.LENGTH_SHORT).show();
+                          return;
                       }
 
-                      val intent = Intent(this, TimerService::class.java).apply {
-                          putExtra("TOTAL_SECONDS", totalSeconds)
-                      }
+                      Intent intent = new Intent(this, TimerService.class);
+                      intent.putExtra("TOTAL_SECONDS", totalSeconds);
 
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          startForegroundService(intent)
+                          startForegroundService(intent);
                       } else {
-                          startService(intent)
+                          startService(intent);
                       }
 
-                      statusTv.text = "Durum: Sayaç başlatıldı"
-                      Toast.makeText(this, "Sayaç başlatıldı", Toast.LENGTH_SHORT).show()
-                  }
+                      statusTv.setText("Durum: Sayaç başlatıldı");
+                      Toast.makeText(this, "Sayaç başlatıldı", Toast.LENGTH_SHORT).show();
+                  });
 
-                  findViewById<Button>(R.id.btnStop).setOnClickListener {
-                      stopService(Intent(this, TimerService::class.java))
-                      statusTv.text = "Durum: Durduruldu"
-                      Toast.makeText(this, "Durduruldu", Toast.LENGTH_SHORT).show()
-                  }
+                  stopBtn.setOnClickListener(v -> {
+                      stopService(new Intent(this, TimerService.class));
+                      statusTv.setText("Durum: Durduruldu");
+                      Toast.makeText(this, "Durduruldu", Toast.LENGTH_SHORT).show();
+                  });
               }
 
-              private fun checkOverlayPermission(): Boolean {
-                  return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      Settings.canDrawOverlays(this)
-                  } else true
-              }
-
-              private fun requestOverlayPermission() {
+              private boolean checkOverlayPermission() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      val intent = Intent(
-                          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                          Uri.parse("package:$packageName")
-                      )
-                      startActivityForResult(intent, REQUEST_CODE_OVERLAY)
-                      Toast.makeText(this, "Lütfen overlay izni verin", Toast.LENGTH_SHORT).show()
+                      return Settings.canDrawOverlays(this);
+                  }
+                  return true;
+              }
+
+              private void requestOverlayPermission() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                              Uri.parse("package:" + getPackageName()));
+                      startActivityForResult(intent, REQ_OVERLAY);
+                      Toast.makeText(this, "Lütfen overlay izni verin", Toast.LENGTH_SHORT).show();
                   }
               }
           }
-          EOFMAIN
+          EOF
 
-          # --- TimerService.kt (stable: no crashes, timer actually starts) ---
-          cat > app/src/main/java/com/yks/timer/TimerService.kt << 'EOFSERVICE'
-          package com.yks.timer
+          # --- TimerService.java ---
+          cat > app/src/main/java/com/yks/timer/TimerService.java << 'EOF'
+          package com.yks.timer;
 
-          import android.app.Notification
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.Service
-          import android.content.Context
-          import android.content.Intent
-          import android.graphics.PixelFormat
-          import android.os.Build
-          import android.os.CountDownTimer
-          import android.os.IBinder
-          import android.view.Gravity
-          import android.view.LayoutInflater
-          import android.view.View
-          import android.view.WindowManager
-          import android.widget.Button
-          import android.widget.TextView
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.PixelFormat;
+          import android.os.Build;
+          import android.os.CountDownTimer;
+          import android.os.Handler;
+          import android.os.IBinder;
+          import android.view.Gravity;
+          import android.view.LayoutInflater;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.widget.Button;
+          import android.widget.TextView;
 
-          class TimerService : Service() {
+          public class TimerService extends Service {
 
-              private var windowManager: WindowManager? = null
-              private var overlayView: View? = null
-              private var redScreenView: View? = null
+              private static final String CHANNEL_ID = "timer_channel";
 
-              private var timer: CountDownTimer? = null
-              private var totalSeconds: Long = 60
-              private var initialSeconds: Long = 60
-              private var isPaused: Boolean = false
+              private WindowManager windowManager;
+              private View overlayView;
+              private View redScreenView;
 
-              override fun onBind(intent: Intent?): IBinder? = null
+              private CountDownTimer timer;
+              private long totalSeconds = 60;
+              private long initialSeconds = 60;
+              private boolean isPaused = false;
 
-              override fun onCreate() {
-                  super.onCreate()
-                  windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                  startForeground(1, buildNotification())
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+                  startForeground(1, buildNotification());
               }
 
-              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-                  initialSeconds = (intent?.getIntExtra("TOTAL_SECONDS", 60) ?: 60).toLong()
-                  if (!isPaused) {
-                      totalSeconds = initialSeconds
-                  } else {
-                      // If paused and new start comes, treat it as new timer
-                      totalSeconds = initialSeconds
-                      isPaused = false
-                  }
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  int sec = (intent != null) ? intent.getIntExtra("TOTAL_SECONDS", 60) : 60;
+                  initialSeconds = sec;
+                  totalSeconds = initialSeconds;
+                  isPaused = false;
 
                   if (overlayView == null) {
-                      showOverlay()
+                      showOverlay();
                   } else {
-                      updateTimerText()
-                      updateButtons()
+                      updateTimerText();
+                      updateButtons();
                   }
 
-                  // Start immediately (user expectation)
-                  startTimer()
+                  // Start immediately
+                  startTimer();
 
-                  return START_STICKY
+                  return START_STICKY;
               }
 
-              private fun showOverlay() {
-                  val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else
-                      WindowManager.LayoutParams.TYPE_PHONE
+              private void showOverlay() {
+                  int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                          : WindowManager.LayoutParams.TYPE_PHONE;
 
-                  val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      type,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                      PixelFormat.TRANSLUCENT
-                  ).apply {
-                      gravity = Gravity.TOP or Gravity.END
-                      x = 24
-                      y = 120
-                  }
+                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                          WindowManager.LayoutParams.WRAP_CONTENT,
+                          WindowManager.LayoutParams.WRAP_CONTENT,
+                          type,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          PixelFormat.TRANSLUCENT
+                  );
+                  params.gravity = Gravity.TOP | Gravity.END;
+                  params.x = 24;
+                  params.y = 120;
 
-                  overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null)
-                  windowManager?.addView(overlayView, params)
+                  overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
+                  windowManager.addView(overlayView, params);
 
-                  overlayView?.findViewById<Button>(R.id.btnStart)?.setOnClickListener {
-                      if (isPaused) resumeTimer() else startTimer()
-                  }
-                  overlayView?.findViewById<Button>(R.id.btnPause)?.setOnClickListener { pauseTimer() }
-                  overlayView?.findViewById<Button>(R.id.btnReset)?.setOnClickListener { resetTimer() }
-                  overlayView?.findViewById<Button>(R.id.btnNext)?.setOnClickListener { nextQuestion() }
-                  overlayView?.findViewById<Button>(R.id.btnClose)?.setOnClickListener { stopSelf() }
+                  Button btnStart = overlayView.findViewById(R.id.btnStart);
+                  Button btnPause = overlayView.findViewById(R.id.btnPause);
+                  Button btnReset = overlayView.findViewById(R.id.btnReset);
+                  Button btnNext  = overlayView.findViewById(R.id.btnNext);
+                  Button btnClose = overlayView.findViewById(R.id.btnClose);
 
-                  updateTimerText()
-                  updateButtons()
+                  btnStart.setOnClickListener(v -> { if (isPaused) resumeTimer(); else startTimer(); });
+                  btnPause.setOnClickListener(v -> pauseTimer());
+                  btnReset.setOnClickListener(v -> resetTimer());
+                  btnNext.setOnClickListener(v -> nextQuestion());
+                  btnClose.setOnClickListener(v -> stopSelf());
+
+                  updateTimerText();
+                  updateButtons();
               }
 
-              private fun startTimer() {
-                  timer?.cancel()
-                  isPaused = false
-                  updateButtons()
+              private void startTimer() {
+                  if (timer != null) timer.cancel();
+                  isPaused = false;
+                  updateButtons();
 
-                  timer = object : CountDownTimer(totalSeconds * 1000, 1000) {
-                      override fun onTick(millisUntilFinished: Long) {
-                          totalSeconds = millisUntilFinished / 1000
-                          updateTimerText()
+                  timer = new CountDownTimer(totalSeconds * 1000, 1000) {
+                      @Override public void onTick(long millisUntilFinished) {
+                          totalSeconds = millisUntilFinished / 1000;
+                          updateTimerText();
                       }
-
-                      override fun onFinish() {
-                          totalSeconds = 0
-                          updateTimerText()
-                          showRedScreen()
+                      @Override public void onFinish() {
+                          totalSeconds = 0;
+                          updateTimerText();
+                          showRedScreen();
                       }
-                  }.start()
+                  }.start();
               }
 
-              private fun pauseTimer() {
-                  if (isPaused) return
-                  isPaused = true
-                  timer?.cancel()
-                  updateButtons()
+              private void pauseTimer() {
+                  if (isPaused) return;
+                  isPaused = true;
+                  if (timer != null) timer.cancel();
+                  updateButtons();
               }
 
-              private fun resumeTimer() {
-                  if (!isPaused) return
-                  startTimer()
+              private void resumeTimer() {
+                  if (!isPaused) return;
+                  startTimer();
               }
 
-              private fun resetTimer() {
-                  timer?.cancel()
-                  isPaused = true
-                  totalSeconds = initialSeconds
-                  updateTimerText()
-                  updateButtons()
+              private void resetTimer() {
+                  if (timer != null) timer.cancel();
+                  isPaused = true;
+                  totalSeconds = initialSeconds;
+                  updateTimerText();
+                  updateButtons();
               }
 
-              private fun nextQuestion() {
-                  overlayView?.findViewById<Button>(R.id.btnNext)?.isEnabled = false
-                  android.os.Handler(mainLooper).postDelayed({
-                      timer?.cancel()
-                      totalSeconds = initialSeconds
-                      isPaused = false
-                      updateTimerText()
-                      startTimer()
-                      overlayView?.findViewById<Button>(R.id.btnNext)?.isEnabled = true
-                  }, 800)
+              private void nextQuestion() {
+                  Button btnNext = overlayView.findViewById(R.id.btnNext);
+                  btnNext.setEnabled(false);
+
+                  new Handler(getMainLooper()).postDelayed(() -> {
+                      if (timer != null) timer.cancel();
+                      totalSeconds = initialSeconds;
+                      isPaused = false;
+                      updateTimerText();
+                      startTimer();
+                      btnNext.setEnabled(true);
+                  }, 800);
               }
 
-              private fun showRedScreen() {
-                  if (redScreenView != null) return
+              private void showRedScreen() {
+                  if (redScreenView != null) return;
 
-                  val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                  else
-                      WindowManager.LayoutParams.TYPE_PHONE
+                  int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                          ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                          : WindowManager.LayoutParams.TYPE_PHONE;
 
-                  val params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      WindowManager.LayoutParams.MATCH_PARENT,
-                      type,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                      PixelFormat.TRANSLUCENT
-                  )
+                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                          WindowManager.LayoutParams.MATCH_PARENT,
+                          WindowManager.LayoutParams.MATCH_PARENT,
+                          type,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          PixelFormat.TRANSLUCENT
+                  );
 
-                  redScreenView = LayoutInflater.from(this).inflate(R.layout.red_screen, null)
-                  windowManager?.addView(redScreenView, params)
+                  redScreenView = LayoutInflater.from(this).inflate(R.layout.red_screen, null);
+                  windowManager.addView(redScreenView, params);
 
-                  redScreenView?.findViewById<Button>(R.id.btnSkip)?.setOnClickListener {
-                      skipQuestion()
+                  Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
+                  btnSkip.setOnClickListener(v -> skipQuestion());
+              }
+
+              private void skipQuestion() {
+                  Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
+                  btnSkip.setEnabled(false);
+
+                  new Handler(getMainLooper()).postDelayed(() -> {
+                      hideRedScreen();
+                      totalSeconds = initialSeconds;
+                      isPaused = false;
+                      startTimer();
+                  }, 2000);
+              }
+
+              private void hideRedScreen() {
+                  if (redScreenView != null) {
+                      windowManager.removeView(redScreenView);
+                      redScreenView = null;
                   }
               }
 
-              private fun skipQuestion() {
-                  redScreenView?.findViewById<Button>(R.id.btnSkip)?.isEnabled = false
-                  android.os.Handler(mainLooper).postDelayed({
-                      hideRedScreen()
-                      totalSeconds = initialSeconds
-                      isPaused = false
-                      startTimer()
-                  }, 2000)
+              private void updateTimerText() {
+                  if (overlayView == null) return;
+                  long m = totalSeconds / 60;
+                  long s = totalSeconds % 60;
+                  TextView tv = overlayView.findViewById(R.id.tvTimer);
+                  tv.setText(String.format("%02d:%02d", m, s));
               }
 
-              private fun hideRedScreen() {
-                  redScreenView?.let {
-                      windowManager?.removeView(it)
-                      redScreenView = null
-                  }
+              private void updateButtons() {
+                  if (overlayView == null) return;
+                  overlayView.findViewById(R.id.btnStart).setEnabled(isPaused);
+                  overlayView.findViewById(R.id.btnPause).setEnabled(!isPaused);
               }
 
-              private fun updateTimerText() {
-                  val m = totalSeconds / 60
-                  val s = totalSeconds % 60
-                  overlayView?.findViewById<TextView>(R.id.tvTimer)?.text =
-                      String.format("%02d:%02d", m, s)
-              }
-
-              private fun updateButtons() {
-                  overlayView?.findViewById<Button>(R.id.btnStart)?.isEnabled = isPaused
-                  overlayView?.findViewById<Button>(R.id.btnPause)?.isEnabled = !isPaused
-              }
-
-              private fun buildNotification(): Notification {
-                  val channelId = "timer_channel"
+              private Notification buildNotification() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val nm = getSystemService(NotificationManager::class.java)
-                      val ch = NotificationChannel(channelId, "YKS Sayaç", NotificationManager.IMPORTANCE_LOW)
-                      nm.createNotificationChannel(ch)
-                      return Notification.Builder(this, channelId)
-                          .setContentTitle("YKS Sayaç")
-                          .setContentText("Sayaç çalışıyor")
-                          .setSmallIcon(android.R.drawable.ic_dialog_info)
-                          .build()
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      NotificationChannel ch = new NotificationChannel(
+                              CHANNEL_ID, "YKS Sayaç", NotificationManager.IMPORTANCE_LOW
+                      );
+                      nm.createNotificationChannel(ch);
+
+                      return new Notification.Builder(this, CHANNEL_ID)
+                              .setContentTitle("YKS Sayaç")
+                              .setContentText("Sayaç çalışıyor")
+                              .setSmallIcon(android.R.drawable.ic_dialog_info)
+                              .build();
+                  } else {
+                      return new Notification.Builder(this)
+                              .setContentTitle("YKS Sayaç")
+                              .setContentText("Sayaç çalışıyor")
+                              .setSmallIcon(android.R.drawable.ic_dialog_info)
+                              .build();
                   }
-                  @Suppress("DEPRECATION")
-                  return Notification.Builder(this)
-                      .setContentTitle("YKS Sayaç")
-                      .setContentText("Sayaç çalışıyor")
-                      .setSmallIcon(android.R.drawable.ic_dialog_info)
-                      .build()
               }
 
-              override fun onDestroy() {
-                  super.onDestroy()
-                  timer?.cancel()
-                  overlayView?.let { windowManager?.removeView(it) }
-                  overlayView = null
-                  hideRedScreen()
+              @Override
+              public void onDestroy() {
+                  super.onDestroy();
+                  if (timer != null) timer.cancel();
+
+                  if (overlayView != null) {
+                      windowManager.removeView(overlayView);
+                      overlayView = null;
+                  }
+                  hideRedScreen();
               }
           }
-          EOFSERVICE
-
-          # --- Gradle Wrapper ---
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOFWRAP'
-          distributionBase=GRADLE_USER_HOME
-          distributionPath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
-          zipStoreBase=GRADLE_USER_HOME
-          zipStorePath=wrapper/dists
-          EOFWRAP
-
-          # Wrapper jar (build-time tool)
-          curl -fsSL -o gradle/wrapper/gradle-wrapper.jar \
-            https://raw.githubusercontent.com/gradle/gradle/v8.2.0/gradle/wrapper/gradle-wrapper.jar
-
-          cat > gradlew << 'EOFGRADLEW'
-          #!/bin/sh
-          set -e
-          APP_HOME="$(cd "$(dirname "$0")" && pwd)"
-          CLASSPATH="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
-
-          JAVA_CMD="${JAVA_HOME}/bin/java"
-          if [ ! -x "$JAVA_CMD" ]; then
-            JAVA_CMD=java
-          fi
-
-          exec "$JAVA_CMD" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
-          EOFGRADLEW
-          chmod +x gradlew
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
+          EOF
 
       - name: Build Debug APK (installable)
-        run: ./gradlew :app:assembleDebug
+        run: gradle :app:assembleDebug
+
+      - name: Inspect APK (sanity)
+        shell: bash
+        run: |
+          set -e
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
