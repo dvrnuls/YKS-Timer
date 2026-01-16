@@ -43,7 +43,7 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxhdpi
           mkdir -p app/src/main/res/mipmap-xxxhdpi
 
-          # Valid PNG icons (AAPT2-safe), no external libs
+          # Valid PNG icons (AAPT2-safe)
           python3 - <<'PY'
           import os, struct, zlib, binascii
           def png_bytes(w, h, rgba):
@@ -262,7 +262,6 @@ jobs:
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
-                  <!-- max=99 => value = progress+1 -->
                   <SeekBar
                       android:id="@+id/seekSize"
                       android:layout_width="match_parent"
@@ -301,7 +300,6 @@ jobs:
           </ScrollView>
           EOF
 
-          # Drag handle expanded: top bar area (more reliable)
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -309,7 +307,9 @@ jobs:
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
               android:orientation="vertical"
-              android:background="#FFFFFFFF">
+              android:background="#FFFFFFFF"
+              android:clickable="true"
+              android:focusable="false">
 
               <LinearLayout
                   android:id="@+id/dragHandle"
@@ -317,7 +317,8 @@ jobs:
                   android:layout_height="wrap_content"
                   android:orientation="vertical"
                   android:padding="10dp"
-                  android:background="#EEEEEE">
+                  android:background="#EEEEEE"
+                  android:clickable="true">
 
                   <TextView
                       android:id="@+id/tvTimer"
@@ -340,7 +341,6 @@ jobs:
                   android:orientation="horizontal"
                   android:padding="8dp">
 
-                  <!-- Single toggle button -->
                   <Button
                       android:id="@+id/btnToggle"
                       android:layout_width="wrap_content"
@@ -555,27 +555,32 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.graphics.PixelFormat;
+          import android.graphics.Point;
+          import android.graphics.Rect;
           import android.media.AudioManager;
           import android.media.ToneGenerator;
           import android.os.Build;
           import android.os.CountDownTimer;
           import android.os.Handler;
           import android.os.IBinder;
+          import android.view.Display;
           import android.view.Gravity;
           import android.view.LayoutInflater;
           import android.view.MotionEvent;
           import android.view.View;
           import android.view.WindowManager;
+          import android.view.WindowMetrics;
           import android.widget.Button;
           import android.widget.TextView;
 
           public class TimerService extends Service {
 
-              public static final String ACTION_START_TIMER = "com.yks.timer.action.START_TIMER";
-              public static final String ACTION_UPDATE_SIZE = "com.yks.timer.action.UPDATE_SIZE";
+              public static final String ACTION_START_TIMER  = "com.yks.timer.action.START_TIMER";
+              public static final String ACTION_UPDATE_SIZE  = "com.yks.timer.action.UPDATE_SIZE";
+              public static final String ACTION_STOP_SERVICE = "com.yks.timer.action.STOP";
 
               public static final String EXTRA_TOTAL_SECONDS = "TOTAL_SECONDS";
-              public static final String EXTRA_OVERLAY_SIZE = "OVERLAY_SIZE";
+              public static final String EXTRA_OVERLAY_SIZE  = "OVERLAY_SIZE";
 
               private static final String CHANNEL_ID = "timer_channel";
 
@@ -608,11 +613,17 @@ jobs:
               public int onStartCommand(Intent intent, int flags, int startId) {
                   String action = (intent != null) ? intent.getAction() : null;
 
+                  if (ACTION_STOP_SERVICE.equals(action)) {
+                      stopCompletely();
+                      return START_NOT_STICKY;
+                  }
+
                   if (ACTION_UPDATE_SIZE.equals(action)) {
                       int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
                       sizePercent = clamp(s, 1, 100);
                       applyOverlayScale();
-                      return START_STICKY;
+                      clampOverlayToScreen();
+                      return START_NOT_STICKY;
                   }
 
                   if (ACTION_START_TIMER.equals(action) || action == null) {
@@ -626,20 +637,21 @@ jobs:
 
                       if (overlayView == null) {
                           if (!showOverlaySafe()) {
-                              stopSelf();
+                              stopCompletely();
                               return START_NOT_STICKY;
                           }
                       } else {
                           applyOverlayScale();
                           updateTimerText();
                           updateToggleText();
+                          clampOverlayToScreen();
                       }
 
                       startTimer();
-                      return START_STICKY;
+                      return START_NOT_STICKY;
                   }
 
-                  return START_STICKY;
+                  return START_NOT_STICKY;
               }
 
               private boolean showOverlaySafe() {
@@ -648,13 +660,14 @@ jobs:
                               ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                               : WindowManager.LayoutParams.TYPE_PHONE;
 
+                      // Flags: NO "NO_LIMITS" -> improves touch + prevents weirdness.
                       overlayParams = new WindowManager.LayoutParams(
                               WindowManager.LayoutParams.WRAP_CONTENT,
                               WindowManager.LayoutParams.WRAP_CONTENT,
                               type,
                               WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                                       | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                                      | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                                      | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                               PixelFormat.TRANSLUCENT
                       );
                       overlayParams.gravity = Gravity.TOP | Gravity.START;
@@ -668,14 +681,13 @@ jobs:
                       windowManager.addView(overlayView, overlayParams);
 
                       final View dragHandle = overlayView.findViewById(R.id.dragHandle);
-                      final TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
 
                       final Button btnToggle = overlayView.findViewById(R.id.btnToggle);
                       final Button btnReset  = overlayView.findViewById(R.id.btnReset);
                       final Button btnNext   = overlayView.findViewById(R.id.btnNext);
                       final Button btnClose  = overlayView.findViewById(R.id.btnClose);
 
-                      // More reliable drag: wide handle area, always consumes DOWN/MOVE/UP
+                      // Reliable drag + clamp to screen
                       dragHandle.setOnTouchListener(new View.OnTouchListener() {
                           private int startX, startY;
                           private float startRawX, startRawY;
@@ -692,9 +704,9 @@ jobs:
                                   case MotionEvent.ACTION_MOVE:
                                       int dx = (int) (e.getRawX() - startRawX);
                                       int dy = (int) (e.getRawY() - startRawY);
-                                      overlayParams.x = startX + dx;
-                                      overlayParams.y = startY + dy;
-                                      try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+                                      int nx = startX + dx;
+                                      int ny = startY + dy;
+                                      setOverlayPositionClamped(nx, ny);
                                       return true;
                                   case MotionEvent.ACTION_UP:
                                   case MotionEvent.ACTION_CANCEL:
@@ -705,29 +717,49 @@ jobs:
                           }
                       });
 
-                      // Toggle: Start/Pause in one button
                       btnToggle.setOnClickListener(v -> {
-                          if (isPaused) {
-                              resumeTimer();
-                          } else {
-                              pauseTimer();
-                          }
+                          if (isPaused) resumeTimer();
+                          else pauseTimer();
                       });
 
                       btnReset.setOnClickListener(v -> resetTimer());
                       btnNext.setOnClickListener(v -> nextQuestion());
-                      btnClose.setOnClickListener(v -> stopSelf());
+
+                      // Close: stop completely and never restart
+                      btnClose.setOnClickListener(v -> stopCompletely());
 
                       applyOverlayScale();
                       updateTimerText();
                       updateToggleText();
-
+                      clampOverlayToScreen();
                       return true;
+
                   } catch (Exception e) {
                       overlayView = null;
                       overlayParams = null;
                       return false;
                   }
+              }
+
+              private void stopCompletely() {
+                  try { cancelTimerAndPending(); } catch (Exception ignored) {}
+
+                  try {
+                      if (overlayView != null) {
+                          windowManager.removeView(overlayView);
+                          overlayView = null;
+                      }
+                  } catch (Exception ignored) {}
+
+                  try {
+                      if (redScreenView != null) {
+                          windowManager.removeView(redScreenView);
+                          redScreenView = null;
+                      }
+                  } catch (Exception ignored) {}
+
+                  try { stopForeground(true); } catch (Exception ignored) {}
+                  try { stopSelf(); } catch (Exception ignored) {}
               }
 
               private void applyOverlayScale() {
@@ -792,8 +824,6 @@ jobs:
 
               private void showRedScreenSafe() {
                   if (redScreenView != null) return;
-
-                  // play "ding ding" when time-up screen appears
                   playDingDing();
 
                   try {
@@ -807,7 +837,7 @@ jobs:
                               type,
                               WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                                       | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                                      | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                                      | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                               PixelFormat.TRANSLUCENT
                       );
 
@@ -815,11 +845,6 @@ jobs:
                       windowManager.addView(redScreenView, params);
 
                       Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
-
-                      // Requested behavior:
-                      // - tap -> red screen closes immediately
-                      // - wait 2s
-                      // - auto restart loop
                       btnSkip.setOnClickListener(v -> {
                           hideRedScreenSafe();   // immediate close
                           cancelTimerAndPending();
@@ -880,6 +905,62 @@ jobs:
                   pendingResume = null;
               }
 
+              // ----- Screen bounds clamp -----
+              private void clampOverlayToScreen() {
+                  if (overlayView == null || overlayParams == null) return;
+                  setOverlayPositionClamped(overlayParams.x, overlayParams.y);
+              }
+
+              private void setOverlayPositionClamped(int x, int y) {
+                  if (overlayView == null || overlayParams == null) return;
+
+                  int[] wh = getScreenSize();
+                  int screenW = wh[0];
+                  int screenH = wh[1];
+
+                  int viewW = overlayView.getWidth();
+                  int viewH = overlayView.getHeight();
+
+                  if (viewW <= 0 || viewH <= 0) {
+                      overlayView.measure(
+                          View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                          View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                      );
+                      viewW = overlayView.getMeasuredWidth();
+                      viewH = overlayView.getMeasuredHeight();
+                  }
+
+                  float scale = sizePercent / 100.0f;
+                  int scaledW = Math.max(1, Math.round(viewW * scale));
+                  int scaledH = Math.max(1, Math.round(viewH * scale));
+
+                  int maxX = Math.max(0, screenW - scaledW);
+                  int maxY = Math.max(0, screenH - scaledH);
+
+                  overlayParams.x = clamp(x, 0, maxX);
+                  overlayParams.y = clamp(y, 0, maxY);
+
+                  try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+              }
+
+              private int[] getScreenSize() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= 30) {
+                          WindowMetrics m = windowManager.getCurrentWindowMetrics();
+                          Rect b = m.getBounds();
+                          return new int[]{ b.width(), b.height() };
+                      } else {
+                          Display d = windowManager.getDefaultDisplay();
+                          Point p = new Point();
+                          d.getRealSize(p);
+                          return new int[]{ p.x, p.y };
+                      }
+                  } catch (Exception e) {
+                      // fallback
+                      return new int[]{ 1080, 1920 };
+                  }
+              }
+
               private Notification buildNotification() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                       NotificationManager nm = getSystemService(NotificationManager.class);
@@ -905,13 +986,21 @@ jobs:
               @Override
               public void onDestroy() {
                   super.onDestroy();
-                  cancelTimerAndPending();
+                  try { cancelTimerAndPending(); } catch (Exception ignored) {}
 
-                  if (overlayView != null) {
-                      try { windowManager.removeView(overlayView); } catch (Exception ignored) {}
-                      overlayView = null;
-                  }
-                  hideRedScreenSafe();
+                  try {
+                      if (overlayView != null) {
+                          windowManager.removeView(overlayView);
+                          overlayView = null;
+                      }
+                  } catch (Exception ignored) {}
+
+                  try {
+                      if (redScreenView != null) {
+                          windowManager.removeView(redScreenView);
+                          redScreenView = null;
+                      }
+                  } catch (Exception ignored) {}
               }
 
               private static int clamp(int v, int lo, int hi) {
