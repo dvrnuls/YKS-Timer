@@ -27,12 +27,39 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxxhdpi
           mkdir -p gradle/wrapper
 
-          # Create minimal launcher icons so resource linking won't fail
-          ICON_B64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+Xo0cAAAAASUVORK5CYII="
-          for d in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            printf '%s' "$ICON_B64" | base64 -d > "app/src/main/res/$d/ic_launcher.png"
-            printf '%s' "$ICON_B64" | base64 -d > "app/src/main/res/$d/ic_launcher_round.png"
-          done
+          # Generate VALID PNG launcher icons (AAPT2-safe) via python (no external libs)
+          python3 - <<'PY'
+          import os, struct, zlib, binascii
+
+          def png_bytes(w, h, rgba):
+              # RGBA PNG, 8-bit per channel, color type 6
+              raw = b''.join((b'\x00' + rgba * w) for _ in range(h))  # filter byte 0 each row
+              comp = zlib.compress(raw, 9)
+
+              def chunk(tag, data):
+                  return (struct.pack(">I", len(data)) + tag + data +
+                          struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
+
+              sig = b'\x89PNG\r\n\x1a\n'
+              ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+              return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', comp) + chunk(b'IEND', b'')
+
+          # 48x48 solid blue (you can change color later)
+          data = png_bytes(48, 48, bytes([25, 118, 210, 255]))
+
+          dirs = [
+              "app/src/main/res/mipmap-mdpi",
+              "app/src/main/res/mipmap-hdpi",
+              "app/src/main/res/mipmap-xhdpi",
+              "app/src/main/res/mipmap-xxhdpi",
+              "app/src/main/res/mipmap-xxxhdpi",
+          ]
+          for d in dirs:
+              os.makedirs(d, exist_ok=True)
+              for name in ("ic_launcher.png", "ic_launcher_round.png"):
+                  with open(os.path.join(d, name), "wb") as f:
+                      f.write(data)
+          PY
 
           # Root build.gradle
           cat > build.gradle << 'EOFROOT'
@@ -243,7 +270,8 @@ jobs:
           }
           EOFMAIN
 
-          # TimerService.kt (this.intent hatasi -> initialSeconds ile, davranis korunur)
+          # TimerService.kt
+          # Not: Orijinalde "this.intent" Service'te yok → derleme hatası. İşlev kaybetmeden initialSeconds ile çözüldü.
           cat > app/src/main/java/com/yks/timer/TimerService.kt << 'EOFSERVICE'
           package com.yks.timer
 
