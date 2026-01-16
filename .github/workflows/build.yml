@@ -1,4 +1,4 @@
-name: Build Offline APK
+name: Build APK
 
 on:
   push:
@@ -12,12 +12,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Gradle
+        shell: bash
+        run: |
+          set -e
+          GRADLE_VERSION="8.2"
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q gradle.zip
+          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
       - name: Generate project (repo can be empty)
         shell: bash
         run: |
           set -euo pipefail
 
-          # --- Structure ---
           mkdir -p app/src/main/java/com/yks/timer
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
@@ -27,7 +41,7 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxhdpi
           mkdir -p app/src/main/res/mipmap-xxxhdpi
 
-          # --- VALID PNG icons (AAPT2-safe), no external libs ---
+          # Valid PNG icons (AAPT2-safe), no external libs
           python3 - <<'PY'
           import os, struct, zlib, binascii
           def png_bytes(w, h, rgba):
@@ -54,7 +68,6 @@ jobs:
                       f.write(data)
           PY
 
-          # --- Gradle files ---
           cat > build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.2.2' apply false
@@ -119,7 +132,7 @@ jobs:
           }
           EOF
 
-          # --- AndroidManifest: NO INTERNET permission + FGS type/permission ---
+          # NO INTERNET permission. Overlay + Foreground service.
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -128,7 +141,6 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <!-- IMPORTANT: No INTERNET permission on purpose -->
 
               <application
                   android:allowBackup="true"
@@ -163,90 +175,121 @@ jobs:
           </resources>
           EOF
 
+          # Main UI: time + size slider (1-100)
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
-              android:layout_height="match_parent"
-              android:orientation="vertical"
-              android:padding="24dp">
-
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="YKS Sayaç"
-                  android:textSize="26sp"
-                  android:textStyle="bold"
-                  android:layout_marginBottom="16dp"/>
-
-              <TextView
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="Süre (dakika:saniye)"
-                  android:textSize="16sp"
-                  android:layout_marginBottom="8dp"/>
+              android:layout_height="match_parent">
 
               <LinearLayout
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:layout_marginBottom="16dp">
-
-                  <EditText
-                      android:id="@+id/timeMinutes"
-                      android:layout_width="0dp"
-                      android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:hint="Dakika"
-                      android:inputType="number"
-                      android:text="1" />
+                  android:orientation="vertical"
+                  android:padding="24dp">
 
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="  :  "
-                      android:textSize="18sp"
-                      android:layout_gravity="center_vertical"/>
+                      android:text="YKS Sayaç"
+                      android:textSize="26sp"
+                      android:textStyle="bold"
+                      android:layout_marginBottom="16dp"/>
 
-                  <EditText
-                      android:id="@+id/timeSeconds"
-                      android:layout_width="0dp"
+                  <TextView
+                      android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:layout_weight="1"
-                      android:hint="Saniye"
-                      android:inputType="number"
-                      android:text="0" />
+                      android:text="Süre (dakika:saniye)"
+                      android:textSize="16sp"
+                      android:layout_marginBottom="8dp"/>
+
+                  <LinearLayout
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:layout_marginBottom="16dp">
+
+                      <EditText
+                          android:id="@+id/timeMinutes"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:hint="Dakika"
+                          android:inputType="number"
+                          android:text="1" />
+
+                      <TextView
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="  :  "
+                          android:textSize="18sp"
+                          android:layout_gravity="center_vertical"/>
+
+                      <EditText
+                          android:id="@+id/timeSeconds"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:hint="Saniye"
+                          android:inputType="number"
+                          android:text="0" />
+                  </LinearLayout>
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Yüzen simge boyutu (1-100)"
+                      android:textSize="16sp"
+                      android:layout_marginBottom="6dp"/>
+
+                  <TextView
+                      android:id="@+id/tvSize"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Boyut: 70"
+                      android:textSize="14sp"
+                      android:layout_marginBottom="6dp"/>
+
+                  <SeekBar
+                      android:id="@+id/seekSize"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:max="100"
+                      android:progress="70"
+                      android:layout_marginBottom="16dp" />
+
+                  <Button
+                      android:id="@+id/btnStart"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Sayacı Başlat" />
+
+                  <Button
+                      android:id="@+id/btnStop"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Durdur"
+                      android:layout_marginTop="8dp" />
+
+                  <TextView
+                      android:id="@+id/tvStatus"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Durum: Hazır"
+                      android:layout_marginTop="16dp"/>
               </LinearLayout>
-
-              <Button
-                  android:id="@+id/btnStart"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Sayacı Başlat" />
-
-              <Button
-                  android:id="@+id/btnStop"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Durdur"
-                  android:layout_marginTop="8dp" />
-
-              <TextView
-                  android:id="@+id/tvStatus"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:text="Durum: Hazır"
-                  android:layout_marginTop="16dp"/>
-          </LinearLayout>
+          </ScrollView>
           EOF
 
+          # Smaller overlay by default; draggable via timer text
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/rootOverlay"
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
               android:orientation="vertical"
-              android:padding="12dp"
+              android:padding="8dp"
               android:background="#FFFFFFFF">
 
               <TextView
@@ -254,9 +297,9 @@ jobs:
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
                   android:text="01:00"
-                  android:textSize="28sp"
+                  android:textSize="22sp"
                   android:textStyle="bold"
-                  android:layout_marginBottom="8dp"/>
+                  android:layout_marginBottom="6dp" />
 
               <LinearLayout
                   android:layout_width="wrap_content"
@@ -305,7 +348,7 @@ jobs:
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
-              android:background="#CC000000">
+              android:background="#CCFF0000">
 
               <LinearLayout
                   android:layout_width="wrap_content"
@@ -328,7 +371,7 @@ jobs:
                       android:id="@+id/btnSkip"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Soruyu Geç (2 sn)"/>
+                      android:text="Soruyu Geç"/>
               </LinearLayout>
           </FrameLayout>
           EOF
@@ -339,6 +382,7 @@ jobs:
           import android.Manifest;
           import android.app.Activity;
           import android.content.Intent;
+          import android.content.SharedPreferences;
           import android.content.pm.PackageManager;
           import android.net.Uri;
           import android.os.Build;
@@ -346,6 +390,7 @@ jobs:
           import android.provider.Settings;
           import android.widget.Button;
           import android.widget.EditText;
+          import android.widget.SeekBar;
           import android.widget.TextView;
           import android.widget.Toast;
 
@@ -353,6 +398,10 @@ jobs:
 
               private static final int REQ_OVERLAY = 1001;
               private static final int REQ_NOTIF = 1002;
+
+              private static final String PREFS = "yks_timer_prefs";
+              private static final String KEY_SIZE = "overlay_size"; // 1..100
+              private static final int DEFAULT_SIZE = 70;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -368,6 +417,30 @@ jobs:
                   final EditText minutesEt = findViewById(R.id.timeMinutes);
                   final EditText secondsEt = findViewById(R.id.timeSeconds);
                   final TextView statusTv = findViewById(R.id.tvStatus);
+
+                  final TextView tvSize = findViewById(R.id.tvSize);
+                  final SeekBar seek = findViewById(R.id.seekSize);
+
+                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  int size = prefs.getInt(KEY_SIZE, DEFAULT_SIZE);
+                  size = clamp(size, 1, 100);
+                  seek.setProgress(size);
+                  tvSize.setText("Boyut: " + size);
+
+                  seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                      @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                          int v = clamp(progress, 1, 100);
+                          tvSize.setText("Boyut: " + v);
+                          prefs.edit().putInt(KEY_SIZE, v).apply();
+
+                          // Notify service immediately (if running)
+                          Intent i = new Intent("com.yks.timer.UPDATE_SIZE");
+                          i.putExtra("SIZE", v);
+                          sendBroadcast(i);
+                      }
+                      @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+                      @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+                  });
 
                   Button startBtn = findViewById(R.id.btnStart);
                   Button stopBtn = findViewById(R.id.btnStop);
@@ -391,11 +464,8 @@ jobs:
                       Intent intent = new Intent(this, TimerService.class);
                       intent.putExtra("TOTAL_SECONDS", totalSeconds);
 
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                          startForegroundService(intent);
-                      } else {
-                          startService(intent);
-                      }
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
+                      else startService(intent);
 
                       statusTv.setText("Durum: Sayaç başlatıldı");
                       Toast.makeText(this, "Sayaç başlatıldı", Toast.LENGTH_SHORT).show();
@@ -409,9 +479,7 @@ jobs:
               }
 
               private boolean checkOverlayPermission() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                      return Settings.canDrawOverlays(this);
-                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) return Settings.canDrawOverlays(this);
                   return true;
               }
 
@@ -423,6 +491,12 @@ jobs:
                       Toast.makeText(this, "Lütfen overlay izni verin", Toast.LENGTH_SHORT).show();
                   }
               }
+
+              private static int clamp(int v, int lo, int hi) {
+                  if (v < lo) return lo;
+                  if (v > hi) return hi;
+                  return v;
+              }
           }
           EOF
 
@@ -433,8 +507,11 @@ jobs:
           import android.app.NotificationChannel;
           import android.app.NotificationManager;
           import android.app.Service;
+          import android.content.BroadcastReceiver;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.SharedPreferences;
           import android.graphics.PixelFormat;
           import android.os.Build;
           import android.os.CountDownTimer;
@@ -442,6 +519,7 @@ jobs:
           import android.os.IBinder;
           import android.view.Gravity;
           import android.view.LayoutInflater;
+          import android.view.MotionEvent;
           import android.view.View;
           import android.view.WindowManager;
           import android.widget.Button;
@@ -450,15 +528,31 @@ jobs:
           public class TimerService extends Service {
 
               private static final String CHANNEL_ID = "timer_channel";
+              private static final String PREFS = "yks_timer_prefs";
+              private static final String KEY_SIZE = "overlay_size";
+              private static final int DEFAULT_SIZE = 70;
 
               private WindowManager windowManager;
               private View overlayView;
               private View redScreenView;
+              private WindowManager.LayoutParams overlayParams;
 
               private CountDownTimer timer;
               private long totalSeconds = 60;
               private long initialSeconds = 60;
               private boolean isPaused = false;
+
+              private int sizePercent = DEFAULT_SIZE;
+
+              private final BroadcastReceiver sizeReceiver = new BroadcastReceiver() {
+                  @Override public void onReceive(Context context, Intent intent) {
+                      if (intent == null) return;
+                      if (!"com.yks.timer.UPDATE_SIZE".equals(intent.getAction())) return;
+                      int v = intent.getIntExtra("SIZE", DEFAULT_SIZE);
+                      sizePercent = clamp(v, 1, 100);
+                      applyOverlayScale();
+                  }
+              };
 
               @Override
               public IBinder onBind(Intent intent) { return null; }
@@ -467,6 +561,11 @@ jobs:
               public void onCreate() {
                   super.onCreate();
                   windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+
+                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  sizePercent = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
+
+                  registerReceiver(sizeReceiver, new IntentFilter("com.yks.timer.UPDATE_SIZE"));
                   startForeground(1, buildNotification());
               }
 
@@ -477,14 +576,19 @@ jobs:
                   totalSeconds = initialSeconds;
                   isPaused = false;
 
+                  // refresh size from prefs in case app changed it before service start
+                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  sizePercent = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
+
                   if (overlayView == null) {
                       showOverlay();
                   } else {
                       updateTimerText();
                       updateButtons();
+                      applyOverlayScale();
                   }
 
-                  startTimer();
+                  startTimer(); // start immediately
                   return START_STICKY;
               }
 
@@ -493,25 +597,56 @@ jobs:
                           ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                           : WindowManager.LayoutParams.TYPE_PHONE;
 
-                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                  overlayParams = new WindowManager.LayoutParams(
                           WindowManager.LayoutParams.WRAP_CONTENT,
                           WindowManager.LayoutParams.WRAP_CONTENT,
                           type,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                           PixelFormat.TRANSLUCENT
                   );
-                  params.gravity = Gravity.TOP | Gravity.END;
-                  params.x = 24;
-                  params.y = 120;
+                  overlayParams.gravity = Gravity.TOP | Gravity.START;
+                  overlayParams.x = 24;
+                  overlayParams.y = 120;
 
                   overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
-                  windowManager.addView(overlayView, params);
+                  windowManager.addView(overlayView, overlayParams);
 
                   Button btnStart = overlayView.findViewById(R.id.btnStart);
                   Button btnPause = overlayView.findViewById(R.id.btnPause);
                   Button btnReset = overlayView.findViewById(R.id.btnReset);
                   Button btnNext  = overlayView.findViewById(R.id.btnNext);
                   Button btnClose = overlayView.findViewById(R.id.btnClose);
+                  TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
+
+                  // Drag from timer text (doesn't break button clicks)
+                  tvTimer.setOnTouchListener(new View.OnTouchListener() {
+                      private int startX, startY;
+                      private float startRawX, startRawY;
+
+                      @Override
+                      public boolean onTouch(View v, MotionEvent e) {
+                          if (overlayParams == null) return false;
+                          switch (e.getAction()) {
+                              case MotionEvent.ACTION_DOWN:
+                                  startX = overlayParams.x;
+                                  startY = overlayParams.y;
+                                  startRawX = e.getRawX();
+                                  startRawY = e.getRawY();
+                                  return true;
+                              case MotionEvent.ACTION_MOVE:
+                                  int dx = (int) (e.getRawX() - startRawX);
+                                  int dy = (int) (e.getRawY() - startRawY);
+                                  overlayParams.x = startX + dx;
+                                  overlayParams.y = startY + dy;
+                                  windowManager.updateViewLayout(overlayView, overlayParams);
+                                  return true;
+                              default:
+                                  return false;
+                          }
+                      }
+                  });
 
                   btnStart.setOnClickListener(v -> { if (isPaused) resumeTimer(); else startTimer(); });
                   btnPause.setOnClickListener(v -> pauseTimer());
@@ -521,6 +656,14 @@ jobs:
 
                   updateTimerText();
                   updateButtons();
+                  applyOverlayScale(); // default smaller
+              }
+
+              private void applyOverlayScale() {
+                  if (overlayView == null) return;
+                  float s = sizePercent / 100.0f;
+                  overlayView.setScaleX(s);
+                  overlayView.setScaleY(s);
               }
 
               private void startTimer() {
@@ -586,7 +729,9 @@ jobs:
                           WindowManager.LayoutParams.MATCH_PARENT,
                           WindowManager.LayoutParams.MATCH_PARENT,
                           type,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                           PixelFormat.TRANSLUCENT
                   );
 
@@ -597,12 +742,14 @@ jobs:
                   btnSkip.setOnClickListener(v -> skipQuestion());
               }
 
+              // IMPORTANT: Your requested behavior:
+              // tap -> red screen closes immediately -> wait 2s -> restart loop automatically
               private void skipQuestion() {
-                  Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
-                  btnSkip.setEnabled(false);
+                  if (timer != null) timer.cancel();
+
+                  hideRedScreen(); // close immediately
 
                   new Handler(getMainLooper()).postDelayed(() -> {
-                      hideRedScreen();
                       totalSeconds = initialSeconds;
                       isPaused = false;
                       startTimer();
@@ -655,6 +802,7 @@ jobs:
               @Override
               public void onDestroy() {
                   super.onDestroy();
+                  try { unregisterReceiver(sizeReceiver); } catch (Exception ignored) {}
                   if (timer != null) timer.cancel();
 
                   if (overlayView != null) {
@@ -663,24 +811,14 @@ jobs:
                   }
                   hideRedScreen();
               }
+
+              private static int clamp(int v, int lo, int hi) {
+                  if (v < lo) return lo;
+                  if (v > hi) return hi;
+                  return v;
+              }
           }
           EOF
-
-      - name: Set up JDK 17 (now gradle files exist, cache works)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Install Gradle
-        shell: bash
-        run: |
-          set -e
-          GRADLE_VERSION="8.2"
-          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
-          unzip -q gradle.zip
-          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Build Debug APK (installable)
         run: gradle :app:assembleDebug
