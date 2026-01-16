@@ -628,8 +628,8 @@ jobs:
                   if (ACTION_UPDATE_SIZE.equals(action)) {
                       int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
                       sizePercent = clamp(s, 1, 100);
-                      applyScaleOnlyKeepWindowBig();   // KEY FIX
-                      clampOverlayToScreen();
+                      applyScaleOnlyKeepWindowBig();
+                      clampOverlayToScreen(); // UPDATED clamp uses scaled visible size
                       return START_NOT_STICKY;
                   }
 
@@ -683,7 +683,6 @@ jobs:
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
 
-                      // Avoid clipping
                       if (overlayView instanceof ViewGroup) {
                           ((ViewGroup) overlayView).setClipChildren(false);
                           ((ViewGroup) overlayView).setClipToPadding(false);
@@ -710,17 +709,14 @@ jobs:
                       overlayView.post(() -> {
                           if (overlayView == null || overlayContent == null) return;
 
-                          // Capture UNSCALED base sizes once
                           baseContentW = overlayContent.getWidth();
                           baseContentH = overlayContent.getHeight();
                           baseHandleH  = dragHandle.getHeight();
 
-                          // Keep window big (unscaled) forever, only scale drawing
                           applyScaleOnlyKeepWindowBig();
                           clampOverlayToScreen();
                       });
 
-                      // Touch: drag in header; clicks remapped to scaled content
                       overlayView.setOnTouchListener(new View.OnTouchListener() {
                           private boolean dragging = false;
                           private int startX, startY;
@@ -797,9 +793,7 @@ jobs:
                   }
               }
 
-              // KEY FIX:
-              // - Only scale overlayContent drawing
-              // - Keep overlay window size ALWAYS unscaled (so nothing can be clipped at small %)
+              // Keep window big (unscaled) to prevent clipping; only scale drawing.
               private void applyScaleOnlyKeepWindowBig() {
                   if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
@@ -821,12 +815,15 @@ jobs:
                   overlayContent.setScaleX(scale);
                   overlayContent.setScaleY(scale);
 
-                  // Keep window at base size + safe padding
-                  int pad = (int) (18f * getResources().getDisplayMetrics().density + 0.5f);
+                  int pad = dp(18); // just safety; doesn't affect edge-align now (clamp uses scaled size)
                   overlayParams.width  = Math.max(1, baseContentW + pad);
                   overlayParams.height = Math.max(1, baseContentH + pad);
 
                   try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+              }
+
+              private int dp(int v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
               }
 
               private void stopCompletely() {
@@ -987,9 +984,38 @@ jobs:
                   pendingResume = null;
               }
 
+              // UPDATED: clamp using SCALED VISIBLE CONTENT size (not the big window size)
               private void clampOverlayToScreen() {
                   if (overlayView == null || overlayParams == null) return;
                   setOverlayPositionClamped(overlayParams.x, overlayParams.y);
+              }
+
+              private int[] getVisibleScaledSize() {
+                  float scale = sizePercent / 100.0f;
+                  if (scale <= 0f) scale = 1f;
+
+                  int w = baseContentW;
+                  int h = baseContentH;
+
+                  if (w <= 0 || h <= 0) {
+                      if (overlayContent != null) {
+                          overlayContent.measure(
+                                  View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                                  View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                          );
+                          w = overlayContent.getMeasuredWidth();
+                          h = overlayContent.getMeasuredHeight();
+                          if (w > 0) baseContentW = w;
+                          if (h > 0) baseContentH = h;
+                      }
+                  }
+
+                  int scaledW = (int) Math.ceil(w * scale);
+                  int scaledH = (int) Math.ceil(h * scale);
+
+                  // rootOverlay has 6dp padding; we allow it to go a bit offscreen if needed.
+                  // If you want padding also always on screen, add dp(12) here.
+                  return new int[]{ Math.max(1, scaledW), Math.max(1, scaledH) };
               }
 
               private void setOverlayPositionClamped(int x, int y) {
@@ -999,20 +1025,12 @@ jobs:
                   int screenW = wh[0];
                   int screenH = wh[1];
 
-                  int w = overlayParams.width;
-                  int h = overlayParams.height;
+                  int[] visible = getVisibleScaledSize();
+                  int vw = visible[0];
+                  int vh = visible[1];
 
-                  if (w <= 0 || h <= 0) {
-                      overlayView.measure(
-                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                      );
-                      w = overlayView.getMeasuredWidth();
-                      h = overlayView.getMeasuredHeight();
-                  }
-
-                  int maxX = Math.max(0, screenW - w);
-                  int maxY = Math.max(0, screenH - h);
+                  int maxX = Math.max(0, screenW - vw);
+                  int maxY = Math.max(0, screenH - vh);
 
                   overlayParams.x = clamp(x, 0, maxX);
                   overlayParams.y = clamp(y, 0, maxY);
