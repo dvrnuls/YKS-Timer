@@ -31,6 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export LANG=C.UTF-8
+          export LC_ALL=C.UTF-8
 
           mkdir -p app/src/main/java/com/yks/timer
           mkdir -p app/src/main/res/layout
@@ -130,7 +132,6 @@ jobs:
           }
           EOF
 
-          # Manifest: NO INTERNET permission.
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -171,10 +172,22 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">YKS Sayaç</string>
+
+              <string name="btn_start">Başlat</string>
+              <string name="btn_pause">Duraklat</string>
+              <string name="btn_reset">Sıfırla</string>
+              <string name="btn_next">Sonraki</string>
+              <string name="btn_close">Kapat</string>
+
+              <string name="btn_apply_size">Boyutu Uygula</string>
+              <string name="btn_main_start">Sayacı Başlat</string>
+              <string name="btn_main_stop">Durdur</string>
+
+              <string name="time_up">SÜRE DOLDU!</string>
+              <string name="skip">Soruyu Geç</string>
           </resources>
           EOF
 
-          # UI: time + size(1-100) + apply
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -237,7 +250,7 @@ jobs:
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Yüzen simge boyutu (1-100)"
+                      android:text="Yüzen sayaç boyutu (1-100)"
                       android:textSize="16sp"
                       android:layout_marginBottom="6dp"/>
 
@@ -249,7 +262,7 @@ jobs:
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
-                  <!-- max=99 => (progress+1) = 1..100 -->
+                  <!-- max=99 => value = progress+1 -->
                   <SeekBar
                       android:id="@+id/seekSize"
                       android:layout_width="match_parent"
@@ -262,20 +275,20 @@ jobs:
                       android:id="@+id/btnApplySize"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:text="Boyutu Uygula" />
+                      android:text="@string/btn_apply_size" />
 
                   <Button
                       android:id="@+id/btnStart"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:text="Sayacı Başlat"
+                      android:text="@string/btn_main_start"
                       android:layout_marginTop="10dp" />
 
                   <Button
                       android:id="@+id/btnStop"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:text="Durdur"
+                      android:text="@string/btn_main_stop"
                       android:layout_marginTop="8dp" />
 
                   <TextView
@@ -288,7 +301,7 @@ jobs:
           </ScrollView>
           EOF
 
-          # Overlay: draggable from timer text
+          # Drag handle expanded: top bar area (more reliable)
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -296,55 +309,63 @@ jobs:
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
               android:orientation="vertical"
-              android:padding="8dp"
               android:background="#FFFFFFFF">
 
-              <TextView
-                  android:id="@+id/tvTimer"
-                  android:layout_width="wrap_content"
+              <LinearLayout
+                  android:id="@+id/dragHandle"
+                  android:layout_width="match_parent"
                   android:layout_height="wrap_content"
-                  android:text="01:00"
-                  android:textSize="22sp"
-                  android:textStyle="bold"
-                  android:layout_marginBottom="6dp" />
+                  android:orientation="vertical"
+                  android:padding="10dp"
+                  android:background="#EEEEEE">
+
+                  <TextView
+                      android:id="@+id/tvTimer"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="01:00"
+                      android:textSize="22sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="(Sürüklemek için buradan tut)"
+                      android:textSize="10sp" />
+              </LinearLayout>
 
               <LinearLayout
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:orientation="horizontal">
+                  android:orientation="horizontal"
+                  android:padding="8dp">
 
+                  <!-- Single toggle button -->
                   <Button
-                      android:id="@+id/btnStart"
+                      android:id="@+id/btnToggle"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Baslat" />
-
-                  <Button
-                      android:id="@+id/btnPause"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="Duraklat"
-                      android:layout_marginStart="6dp"/>
+                      android:text="@string/btn_start" />
 
                   <Button
                       android:id="@+id/btnReset"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Sifirla"
+                      android:text="@string/btn_reset"
                       android:layout_marginStart="6dp"/>
 
                   <Button
                       android:id="@+id/btnNext"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Sonraki"
+                      android:text="@string/btn_next"
                       android:layout_marginStart="6dp"/>
 
                   <Button
                       android:id="@+id/btnClose"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Kapat"
+                      android:text="@string/btn_close"
                       android:layout_marginStart="6dp"/>
               </LinearLayout>
           </LinearLayout>
@@ -368,7 +389,7 @@ jobs:
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="SURE DOLDU!"
+                      android:text="@string/time_up"
                       android:textColor="#FFFFFF"
                       android:textSize="28sp"
                       android:textStyle="bold"
@@ -378,12 +399,11 @@ jobs:
                       android:id="@+id/btnSkip"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Soruyu Gec"/>
+                      android:text="@string/skip"/>
               </LinearLayout>
           </FrameLayout>
           EOF
 
-          # MainActivity: prefs size + apply/start/stop
           cat > app/src/main/java/com/yks/timer/MainActivity.java << 'EOF'
           package com.yks.timer;
 
@@ -433,7 +453,6 @@ jobs:
                   final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
                   int size = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
 
-                  // seek progress 0..99 => value = progress+1
                   seek.setProgress(size - 1);
                   tvSize.setText("Boyut: " + size);
 
@@ -459,7 +478,8 @@ jobs:
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i);
                       else startService(i);
 
-                      statusTv.setText("Durum: Boyut uygulandi (" + s + ")");
+                      statusTv.setText("Durum: Boyut uygulandı (" + s + ")");
+                      Toast.makeText(this, "Boyut uygulandı", Toast.LENGTH_SHORT).show();
                   });
 
                   Button startBtn = findViewById(R.id.btnStart);
@@ -476,7 +496,7 @@ jobs:
                       int totalSeconds = minutes * 60 + seconds;
 
                       if (totalSeconds <= 0) {
-                          Toast.makeText(this, "Lutfen gecerli bir sure girin", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Lütfen geçerli bir süre girin", Toast.LENGTH_SHORT).show();
                           return;
                       }
 
@@ -490,7 +510,7 @@ jobs:
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
                       else startService(intent);
 
-                      statusTv.setText("Durum: Sayac baslatildi");
+                      statusTv.setText("Durum: Sayaç başlatıldı");
                   });
 
                   stopBtn.setOnClickListener(v -> {
@@ -509,7 +529,7 @@ jobs:
                       Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                               Uri.parse("package:" + getPackageName()));
                       startActivityForResult(intent, REQ_OVERLAY);
-                      Toast.makeText(this, "Overlay izni verin", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, "Lütfen overlay izni verin", Toast.LENGTH_SHORT).show();
                   }
               }
 
@@ -525,7 +545,6 @@ jobs:
           }
           EOF
 
-          # TimerService: fully guarded WindowManager ops, exact red-screen behavior
           cat > app/src/main/java/com/yks/timer/TimerService.java << 'EOF'
           package com.yks.timer;
 
@@ -536,6 +555,8 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.graphics.PixelFormat;
+          import android.media.AudioManager;
+          import android.media.ToneGenerator;
           import android.os.Build;
           import android.os.CountDownTimer;
           import android.os.Handler;
@@ -611,7 +632,7 @@ jobs:
                       } else {
                           applyOverlayScale();
                           updateTimerText();
-                          updateButtons();
+                          updateToggleText();
                       }
 
                       startTimer();
@@ -641,20 +662,23 @@ jobs:
                       overlayParams.y = 120;
 
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
+                      overlayView.setPivotX(0f);
+                      overlayView.setPivotY(0f);
+
                       windowManager.addView(overlayView, overlayParams);
 
-                      Button btnStart = overlayView.findViewById(R.id.btnStart);
-                      Button btnPause = overlayView.findViewById(R.id.btnPause);
-                      Button btnReset = overlayView.findViewById(R.id.btnReset);
-                      Button btnNext  = overlayView.findViewById(R.id.btnNext);
-                      Button btnClose = overlayView.findViewById(R.id.btnClose);
-                      TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
+                      final View dragHandle = overlayView.findViewById(R.id.dragHandle);
+                      final TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
 
-                      // Drag from timer text
-                      tvTimer.setOnTouchListener(new View.OnTouchListener() {
+                      final Button btnToggle = overlayView.findViewById(R.id.btnToggle);
+                      final Button btnReset  = overlayView.findViewById(R.id.btnReset);
+                      final Button btnNext   = overlayView.findViewById(R.id.btnNext);
+                      final Button btnClose  = overlayView.findViewById(R.id.btnClose);
+
+                      // More reliable drag: wide handle area, always consumes DOWN/MOVE/UP
+                      dragHandle.setOnTouchListener(new View.OnTouchListener() {
                           private int startX, startY;
                           private float startRawX, startRawY;
-
                           @Override
                           public boolean onTouch(View v, MotionEvent e) {
                               if (overlayParams == null) return false;
@@ -672,21 +696,32 @@ jobs:
                                       overlayParams.y = startY + dy;
                                       try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
                                       return true;
+                                  case MotionEvent.ACTION_UP:
+                                  case MotionEvent.ACTION_CANCEL:
+                                      return true;
                                   default:
-                                      return false;
+                                      return true;
                               }
                           }
                       });
 
-                      btnStart.setOnClickListener(v -> { if (isPaused) resumeTimer(); else startTimer(); });
-                      btnPause.setOnClickListener(v -> pauseTimer());
+                      // Toggle: Start/Pause in one button
+                      btnToggle.setOnClickListener(v -> {
+                          if (isPaused) {
+                              resumeTimer();
+                          } else {
+                              pauseTimer();
+                          }
+                      });
+
                       btnReset.setOnClickListener(v -> resetTimer());
                       btnNext.setOnClickListener(v -> nextQuestion());
                       btnClose.setOnClickListener(v -> stopSelf());
 
                       applyOverlayScale();
                       updateTimerText();
-                      updateButtons();
+                      updateToggleText();
+
                       return true;
                   } catch (Exception e) {
                       overlayView = null;
@@ -705,7 +740,7 @@ jobs:
               private void startTimer() {
                   cancelTimerAndPending();
                   isPaused = false;
-                  updateButtons();
+                  updateToggleText();
 
                   timer = new CountDownTimer(totalSeconds * 1000, 1000) {
                       @Override public void onTick(long millisUntilFinished) {
@@ -723,8 +758,8 @@ jobs:
               private void pauseTimer() {
                   if (isPaused) return;
                   isPaused = true;
-                  if (timer != null) timer.cancel();
-                  updateButtons();
+                  try { if (timer != null) timer.cancel(); } catch (Exception ignored) {}
+                  updateToggleText();
               }
 
               private void resumeTimer() {
@@ -737,7 +772,7 @@ jobs:
                   isPaused = true;
                   totalSeconds = initialSeconds;
                   updateTimerText();
-                  updateButtons();
+                  updateToggleText();
               }
 
               private void nextQuestion() {
@@ -757,6 +792,9 @@ jobs:
 
               private void showRedScreenSafe() {
                   if (redScreenView != null) return;
+
+                  // play "ding ding" when time-up screen appears
+                  playDingDing();
 
                   try {
                       int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -778,10 +816,10 @@ jobs:
 
                       Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
 
-                      // EXACT BEHAVIOR:
+                      // Requested behavior:
                       // - tap -> red screen closes immediately
                       // - wait 2s
-                      // - auto restart loop with initialSeconds
+                      // - auto restart loop
                       btnSkip.setOnClickListener(v -> {
                           hideRedScreenSafe();   // immediate close
                           cancelTimerAndPending();
@@ -795,6 +833,19 @@ jobs:
                   } catch (Exception e) {
                       redScreenView = null;
                   }
+              }
+
+              private void playDingDing() {
+                  try {
+                      final ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100);
+                      tg.startTone(ToneGenerator.TONE_PROP_BEEP, 140);
+                      handler.postDelayed(() -> {
+                          try { tg.startTone(ToneGenerator.TONE_PROP_BEEP, 140); } catch (Exception ignored) {}
+                          handler.postDelayed(() -> {
+                              try { tg.release(); } catch (Exception ignored) {}
+                          }, 250);
+                      }, 220);
+                  } catch (Exception ignored) {}
               }
 
               private void hideRedScreenSafe() {
@@ -813,11 +864,11 @@ jobs:
                   } catch (Exception ignored) {}
               }
 
-              private void updateButtons() {
+              private void updateToggleText() {
                   if (overlayView == null) return;
                   try {
-                      overlayView.findViewById(R.id.btnStart).setEnabled(isPaused);
-                      overlayView.findViewById(R.id.btnPause).setEnabled(!isPaused);
+                      Button btnToggle = overlayView.findViewById(R.id.btnToggle);
+                      btnToggle.setText(isPaused ? getString(R.string.btn_start) : getString(R.string.btn_pause));
                   } catch (Exception ignored) {}
               }
 
