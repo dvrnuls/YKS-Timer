@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Offline APK
 
 on:
   push:
@@ -100,9 +100,7 @@ jobs:
           EOF
 
           cat > app/build.gradle << 'EOF'
-          plugins {
-              id 'com.android.application'
-          }
+          plugins { id 'com.android.application' }
 
           android {
               namespace 'com.yks.timer'
@@ -132,7 +130,7 @@ jobs:
           }
           EOF
 
-          # NO INTERNET permission. Overlay + Foreground service.
+          # Manifest: NO INTERNET permission.
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -141,6 +139,7 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <!-- No INTERNET permission -->
 
               <application
                   android:allowBackup="true"
@@ -175,7 +174,7 @@ jobs:
           </resources>
           EOF
 
-          # Main UI: time + size slider (1-100)
+          # UI: time + size(1-100) + apply
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
@@ -250,19 +249,27 @@ jobs:
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
+                  <!-- max=99 => (progress+1) = 1..100 -->
                   <SeekBar
                       android:id="@+id/seekSize"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:max="100"
-                      android:progress="70"
-                      android:layout_marginBottom="16dp" />
+                      android:max="99"
+                      android:progress="69"
+                      android:layout_marginBottom="10dp" />
+
+                  <Button
+                      android:id="@+id/btnApplySize"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:text="Boyutu Uygula" />
 
                   <Button
                       android:id="@+id/btnStart"
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
-                      android:text="Sayacı Başlat" />
+                      android:text="Sayacı Başlat"
+                      android:layout_marginTop="10dp" />
 
                   <Button
                       android:id="@+id/btnStop"
@@ -281,7 +288,7 @@ jobs:
           </ScrollView>
           EOF
 
-          # Smaller overlay by default; draggable via timer text
+          # Overlay: draggable from timer text
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -310,7 +317,7 @@ jobs:
                       android:id="@+id/btnStart"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Başlat" />
+                      android:text="Baslat" />
 
                   <Button
                       android:id="@+id/btnPause"
@@ -323,7 +330,7 @@ jobs:
                       android:id="@+id/btnReset"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Sıfırla"
+                      android:text="Sifirla"
                       android:layout_marginStart="6dp"/>
 
                   <Button
@@ -361,7 +368,7 @@ jobs:
                   <TextView
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Süre Doldu!"
+                      android:text="SURE DOLDU!"
                       android:textColor="#FFFFFF"
                       android:textSize="28sp"
                       android:textStyle="bold"
@@ -371,11 +378,12 @@ jobs:
                       android:id="@+id/btnSkip"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Soruyu Geç"/>
+                      android:text="Soruyu Gec"/>
               </LinearLayout>
           </FrameLayout>
           EOF
 
+          # MainActivity: prefs size + apply/start/stop
           cat > app/src/main/java/com/yks/timer/MainActivity.java << 'EOF'
           package com.yks.timer;
 
@@ -420,30 +428,42 @@ jobs:
 
                   final TextView tvSize = findViewById(R.id.tvSize);
                   final SeekBar seek = findViewById(R.id.seekSize);
+                  final Button btnApply = findViewById(R.id.btnApplySize);
 
-                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-                  int size = prefs.getInt(KEY_SIZE, DEFAULT_SIZE);
-                  size = clamp(size, 1, 100);
-                  seek.setProgress(size);
+                  final SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+                  int size = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
+
+                  // seek progress 0..99 => value = progress+1
+                  seek.setProgress(size - 1);
                   tvSize.setText("Boyut: " + size);
 
                   seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                       @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                          int v = clamp(progress, 1, 100);
+                          int v = clamp(progress + 1, 1, 100);
                           tvSize.setText("Boyut: " + v);
                           prefs.edit().putInt(KEY_SIZE, v).apply();
-
-                          // Notify service immediately (if running)
-                          Intent i = new Intent("com.yks.timer.UPDATE_SIZE");
-                          i.putExtra("SIZE", v);
-                          sendBroadcast(i);
                       }
                       @Override public void onStartTrackingTouch(SeekBar seekBar) {}
                       @Override public void onStopTrackingTouch(SeekBar seekBar) {}
                   });
 
+                  btnApply.setOnClickListener(v -> {
+                      if (!checkOverlayPermission()) {
+                          requestOverlayPermission();
+                          return;
+                      }
+                      int s = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
+                      Intent i = new Intent(this, TimerService.class);
+                      i.setAction(TimerService.ACTION_UPDATE_SIZE);
+                      i.putExtra(TimerService.EXTRA_OVERLAY_SIZE, s);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i);
+                      else startService(i);
+
+                      statusTv.setText("Durum: Boyut uygulandi (" + s + ")");
+                  });
+
                   Button startBtn = findViewById(R.id.btnStart);
-                  Button stopBtn = findViewById(R.id.btnStop);
+                  Button stopBtn  = findViewById(R.id.btnStop);
 
                   startBtn.setOnClickListener(v -> {
                       if (!checkOverlayPermission()) {
@@ -451,30 +471,31 @@ jobs:
                           return;
                       }
 
-                      int minutes = 0, seconds = 0;
-                      try { minutes = Integer.parseInt(minutesEt.getText().toString().trim()); } catch (Exception ignored) {}
-                      try { seconds = Integer.parseInt(secondsEt.getText().toString().trim()); } catch (Exception ignored) {}
-
+                      int minutes = parseIntSafe(minutesEt.getText().toString());
+                      int seconds = parseIntSafe(secondsEt.getText().toString());
                       int totalSeconds = minutes * 60 + seconds;
+
                       if (totalSeconds <= 0) {
-                          Toast.makeText(this, "Lütfen geçerli bir süre girin", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Lutfen gecerli bir sure girin", Toast.LENGTH_SHORT).show();
                           return;
                       }
 
+                      int s = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
+
                       Intent intent = new Intent(this, TimerService.class);
-                      intent.putExtra("TOTAL_SECONDS", totalSeconds);
+                      intent.setAction(TimerService.ACTION_START_TIMER);
+                      intent.putExtra(TimerService.EXTRA_TOTAL_SECONDS, totalSeconds);
+                      intent.putExtra(TimerService.EXTRA_OVERLAY_SIZE, s);
 
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
                       else startService(intent);
 
-                      statusTv.setText("Durum: Sayaç başlatıldı");
-                      Toast.makeText(this, "Sayaç başlatıldı", Toast.LENGTH_SHORT).show();
+                      statusTv.setText("Durum: Sayac baslatildi");
                   });
 
                   stopBtn.setOnClickListener(v -> {
                       stopService(new Intent(this, TimerService.class));
                       statusTv.setText("Durum: Durduruldu");
-                      Toast.makeText(this, "Durduruldu", Toast.LENGTH_SHORT).show();
                   });
               }
 
@@ -488,8 +509,12 @@ jobs:
                       Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                               Uri.parse("package:" + getPackageName()));
                       startActivityForResult(intent, REQ_OVERLAY);
-                      Toast.makeText(this, "Lütfen overlay izni verin", Toast.LENGTH_SHORT).show();
+                      Toast.makeText(this, "Overlay izni verin", Toast.LENGTH_SHORT).show();
                   }
+              }
+
+              private static int parseIntSafe(String s) {
+                  try { return Integer.parseInt(s.trim()); } catch (Exception e) { return 0; }
               }
 
               private static int clamp(int v, int lo, int hi) {
@@ -500,6 +525,7 @@ jobs:
           }
           EOF
 
+          # TimerService: fully guarded WindowManager ops, exact red-screen behavior
           cat > app/src/main/java/com/yks/timer/TimerService.java << 'EOF'
           package com.yks.timer;
 
@@ -507,11 +533,8 @@ jobs:
           import android.app.NotificationChannel;
           import android.app.NotificationManager;
           import android.app.Service;
-          import android.content.BroadcastReceiver;
           import android.content.Context;
           import android.content.Intent;
-          import android.content.IntentFilter;
-          import android.content.SharedPreferences;
           import android.graphics.PixelFormat;
           import android.os.Build;
           import android.os.CountDownTimer;
@@ -527,10 +550,13 @@ jobs:
 
           public class TimerService extends Service {
 
+              public static final String ACTION_START_TIMER = "com.yks.timer.action.START_TIMER";
+              public static final String ACTION_UPDATE_SIZE = "com.yks.timer.action.UPDATE_SIZE";
+
+              public static final String EXTRA_TOTAL_SECONDS = "TOTAL_SECONDS";
+              public static final String EXTRA_OVERLAY_SIZE = "OVERLAY_SIZE";
+
               private static final String CHANNEL_ID = "timer_channel";
-              private static final String PREFS = "yks_timer_prefs";
-              private static final String KEY_SIZE = "overlay_size";
-              private static final int DEFAULT_SIZE = 70;
 
               private WindowManager windowManager;
               private View overlayView;
@@ -542,17 +568,10 @@ jobs:
               private long initialSeconds = 60;
               private boolean isPaused = false;
 
-              private int sizePercent = DEFAULT_SIZE;
+              private int sizePercent = 70;
 
-              private final BroadcastReceiver sizeReceiver = new BroadcastReceiver() {
-                  @Override public void onReceive(Context context, Intent intent) {
-                      if (intent == null) return;
-                      if (!"com.yks.timer.UPDATE_SIZE".equals(intent.getAction())) return;
-                      int v = intent.getIntExtra("SIZE", DEFAULT_SIZE);
-                      sizePercent = clamp(v, 1, 100);
-                      applyOverlayScale();
-                  }
-              };
+              private final Handler handler = new Handler();
+              private Runnable pendingResume;
 
               @Override
               public IBinder onBind(Intent intent) { return null; }
@@ -561,102 +580,119 @@ jobs:
               public void onCreate() {
                   super.onCreate();
                   windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-
-                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-                  sizePercent = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
-
-                  registerReceiver(sizeReceiver, new IntentFilter("com.yks.timer.UPDATE_SIZE"));
                   startForeground(1, buildNotification());
               }
 
               @Override
               public int onStartCommand(Intent intent, int flags, int startId) {
-                  int sec = (intent != null) ? intent.getIntExtra("TOTAL_SECONDS", 60) : 60;
-                  initialSeconds = sec;
-                  totalSeconds = initialSeconds;
-                  isPaused = false;
+                  String action = (intent != null) ? intent.getAction() : null;
 
-                  // refresh size from prefs in case app changed it before service start
-                  SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-                  sizePercent = clamp(prefs.getInt(KEY_SIZE, DEFAULT_SIZE), 1, 100);
-
-                  if (overlayView == null) {
-                      showOverlay();
-                  } else {
-                      updateTimerText();
-                      updateButtons();
+                  if (ACTION_UPDATE_SIZE.equals(action)) {
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
+                      sizePercent = clamp(s, 1, 100);
                       applyOverlayScale();
+                      return START_STICKY;
                   }
 
-                  startTimer(); // start immediately
+                  if (ACTION_START_TIMER.equals(action) || action == null) {
+                      int sec = (intent != null) ? intent.getIntExtra(EXTRA_TOTAL_SECONDS, 60) : 60;
+                      initialSeconds = sec;
+                      totalSeconds = initialSeconds;
+                      isPaused = false;
+
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
+                      sizePercent = clamp(s, 1, 100);
+
+                      if (overlayView == null) {
+                          if (!showOverlaySafe()) {
+                              stopSelf();
+                              return START_NOT_STICKY;
+                          }
+                      } else {
+                          applyOverlayScale();
+                          updateTimerText();
+                          updateButtons();
+                      }
+
+                      startTimer();
+                      return START_STICKY;
+                  }
+
                   return START_STICKY;
               }
 
-              private void showOverlay() {
-                  int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                          ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                          : WindowManager.LayoutParams.TYPE_PHONE;
+              private boolean showOverlaySafe() {
+                  try {
+                      int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                              ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                              : WindowManager.LayoutParams.TYPE_PHONE;
 
-                  overlayParams = new WindowManager.LayoutParams(
-                          WindowManager.LayoutParams.WRAP_CONTENT,
-                          WindowManager.LayoutParams.WRAP_CONTENT,
-                          type,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                          PixelFormat.TRANSLUCENT
-                  );
-                  overlayParams.gravity = Gravity.TOP | Gravity.START;
-                  overlayParams.x = 24;
-                  overlayParams.y = 120;
+                      overlayParams = new WindowManager.LayoutParams(
+                              WindowManager.LayoutParams.WRAP_CONTENT,
+                              WindowManager.LayoutParams.WRAP_CONTENT,
+                              type,
+                              WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                      | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                      | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                              PixelFormat.TRANSLUCENT
+                      );
+                      overlayParams.gravity = Gravity.TOP | Gravity.START;
+                      overlayParams.x = 24;
+                      overlayParams.y = 120;
 
-                  overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
-                  windowManager.addView(overlayView, overlayParams);
+                      overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
+                      windowManager.addView(overlayView, overlayParams);
 
-                  Button btnStart = overlayView.findViewById(R.id.btnStart);
-                  Button btnPause = overlayView.findViewById(R.id.btnPause);
-                  Button btnReset = overlayView.findViewById(R.id.btnReset);
-                  Button btnNext  = overlayView.findViewById(R.id.btnNext);
-                  Button btnClose = overlayView.findViewById(R.id.btnClose);
-                  TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
+                      Button btnStart = overlayView.findViewById(R.id.btnStart);
+                      Button btnPause = overlayView.findViewById(R.id.btnPause);
+                      Button btnReset = overlayView.findViewById(R.id.btnReset);
+                      Button btnNext  = overlayView.findViewById(R.id.btnNext);
+                      Button btnClose = overlayView.findViewById(R.id.btnClose);
+                      TextView tvTimer = overlayView.findViewById(R.id.tvTimer);
 
-                  // Drag from timer text (doesn't break button clicks)
-                  tvTimer.setOnTouchListener(new View.OnTouchListener() {
-                      private int startX, startY;
-                      private float startRawX, startRawY;
+                      // Drag from timer text
+                      tvTimer.setOnTouchListener(new View.OnTouchListener() {
+                          private int startX, startY;
+                          private float startRawX, startRawY;
 
-                      @Override
-                      public boolean onTouch(View v, MotionEvent e) {
-                          if (overlayParams == null) return false;
-                          switch (e.getAction()) {
-                              case MotionEvent.ACTION_DOWN:
-                                  startX = overlayParams.x;
-                                  startY = overlayParams.y;
-                                  startRawX = e.getRawX();
-                                  startRawY = e.getRawY();
-                                  return true;
-                              case MotionEvent.ACTION_MOVE:
-                                  int dx = (int) (e.getRawX() - startRawX);
-                                  int dy = (int) (e.getRawY() - startRawY);
-                                  overlayParams.x = startX + dx;
-                                  overlayParams.y = startY + dy;
-                                  windowManager.updateViewLayout(overlayView, overlayParams);
-                                  return true;
-                              default:
-                                  return false;
+                          @Override
+                          public boolean onTouch(View v, MotionEvent e) {
+                              if (overlayParams == null) return false;
+                              switch (e.getAction()) {
+                                  case MotionEvent.ACTION_DOWN:
+                                      startX = overlayParams.x;
+                                      startY = overlayParams.y;
+                                      startRawX = e.getRawX();
+                                      startRawY = e.getRawY();
+                                      return true;
+                                  case MotionEvent.ACTION_MOVE:
+                                      int dx = (int) (e.getRawX() - startRawX);
+                                      int dy = (int) (e.getRawY() - startRawY);
+                                      overlayParams.x = startX + dx;
+                                      overlayParams.y = startY + dy;
+                                      try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+                                      return true;
+                                  default:
+                                      return false;
+                              }
                           }
-                      }
-                  });
+                      });
 
-                  btnStart.setOnClickListener(v -> { if (isPaused) resumeTimer(); else startTimer(); });
-                  btnPause.setOnClickListener(v -> pauseTimer());
-                  btnReset.setOnClickListener(v -> resetTimer());
-                  btnNext.setOnClickListener(v -> nextQuestion());
-                  btnClose.setOnClickListener(v -> stopSelf());
+                      btnStart.setOnClickListener(v -> { if (isPaused) resumeTimer(); else startTimer(); });
+                      btnPause.setOnClickListener(v -> pauseTimer());
+                      btnReset.setOnClickListener(v -> resetTimer());
+                      btnNext.setOnClickListener(v -> nextQuestion());
+                      btnClose.setOnClickListener(v -> stopSelf());
 
-                  updateTimerText();
-                  updateButtons();
-                  applyOverlayScale(); // default smaller
+                      applyOverlayScale();
+                      updateTimerText();
+                      updateButtons();
+                      return true;
+                  } catch (Exception e) {
+                      overlayView = null;
+                      overlayParams = null;
+                      return false;
+                  }
               }
 
               private void applyOverlayScale() {
@@ -667,7 +703,7 @@ jobs:
               }
 
               private void startTimer() {
-                  if (timer != null) timer.cancel();
+                  cancelTimerAndPending();
                   isPaused = false;
                   updateButtons();
 
@@ -679,7 +715,7 @@ jobs:
                       @Override public void onFinish() {
                           totalSeconds = 0;
                           updateTimerText();
-                          showRedScreen();
+                          showRedScreenSafe();
                       }
                   }.start();
               }
@@ -697,7 +733,7 @@ jobs:
               }
 
               private void resetTimer() {
-                  if (timer != null) timer.cancel();
+                  cancelTimerAndPending();
                   isPaused = true;
                   totalSeconds = initialSeconds;
                   updateTimerText();
@@ -705,76 +741,92 @@ jobs:
               }
 
               private void nextQuestion() {
+                  if (overlayView == null) return;
                   Button btnNext = overlayView.findViewById(R.id.btnNext);
                   btnNext.setEnabled(false);
 
-                  new Handler(getMainLooper()).postDelayed(() -> {
-                      if (timer != null) timer.cancel();
+                  handler.postDelayed(() -> {
+                      cancelTimerAndPending();
                       totalSeconds = initialSeconds;
                       isPaused = false;
                       updateTimerText();
                       startTimer();
-                      btnNext.setEnabled(true);
+                      try { btnNext.setEnabled(true); } catch (Exception ignored) {}
                   }, 800);
               }
 
-              private void showRedScreen() {
+              private void showRedScreenSafe() {
                   if (redScreenView != null) return;
 
-                  int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                          ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                          : WindowManager.LayoutParams.TYPE_PHONE;
+                  try {
+                      int type = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                              ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                              : WindowManager.LayoutParams.TYPE_PHONE;
 
-                  WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                          WindowManager.LayoutParams.MATCH_PARENT,
-                          WindowManager.LayoutParams.MATCH_PARENT,
-                          type,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                  | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                                  | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                          PixelFormat.TRANSLUCENT
-                  );
+                      WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                              WindowManager.LayoutParams.MATCH_PARENT,
+                              WindowManager.LayoutParams.MATCH_PARENT,
+                              type,
+                              WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                      | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                      | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                              PixelFormat.TRANSLUCENT
+                      );
 
-                  redScreenView = LayoutInflater.from(this).inflate(R.layout.red_screen, null);
-                  windowManager.addView(redScreenView, params);
+                      redScreenView = LayoutInflater.from(this).inflate(R.layout.red_screen, null);
+                      windowManager.addView(redScreenView, params);
 
-                  Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
-                  btnSkip.setOnClickListener(v -> skipQuestion());
-              }
+                      Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
 
-              // IMPORTANT: Your requested behavior:
-              // tap -> red screen closes immediately -> wait 2s -> restart loop automatically
-              private void skipQuestion() {
-                  if (timer != null) timer.cancel();
-
-                  hideRedScreen(); // close immediately
-
-                  new Handler(getMainLooper()).postDelayed(() -> {
-                      totalSeconds = initialSeconds;
-                      isPaused = false;
-                      startTimer();
-                  }, 2000);
-              }
-
-              private void hideRedScreen() {
-                  if (redScreenView != null) {
-                      windowManager.removeView(redScreenView);
+                      // EXACT BEHAVIOR:
+                      // - tap -> red screen closes immediately
+                      // - wait 2s
+                      // - auto restart loop with initialSeconds
+                      btnSkip.setOnClickListener(v -> {
+                          hideRedScreenSafe();   // immediate close
+                          cancelTimerAndPending();
+                          pendingResume = () -> {
+                              totalSeconds = initialSeconds;
+                              isPaused = false;
+                              startTimer();
+                          };
+                          handler.postDelayed(pendingResume, 2000);
+                      });
+                  } catch (Exception e) {
                       redScreenView = null;
                   }
               }
 
+              private void hideRedScreenSafe() {
+                  if (redScreenView == null) return;
+                  try { windowManager.removeView(redScreenView); } catch (Exception ignored) {}
+                  redScreenView = null;
+              }
+
               private void updateTimerText() {
                   if (overlayView == null) return;
-                  long m = totalSeconds / 60;
-                  long s = totalSeconds % 60;
-                  TextView tv = overlayView.findViewById(R.id.tvTimer);
-                  tv.setText(String.format("%02d:%02d", m, s));
+                  try {
+                      long m = totalSeconds / 60;
+                      long s = totalSeconds % 60;
+                      TextView tv = overlayView.findViewById(R.id.tvTimer);
+                      tv.setText(String.format("%02d:%02d", m, s));
+                  } catch (Exception ignored) {}
               }
 
               private void updateButtons() {
                   if (overlayView == null) return;
-                  overlayView.findViewById(R.id.btnStart).setEnabled(isPaused);
-                  overlayView.findViewById(R.id.btnPause).setEnabled(!isPaused);
+                  try {
+                      overlayView.findViewById(R.id.btnStart).setEnabled(isPaused);
+                      overlayView.findViewById(R.id.btnPause).setEnabled(!isPaused);
+                  } catch (Exception ignored) {}
+              }
+
+              private void cancelTimerAndPending() {
+                  try { if (timer != null) timer.cancel(); } catch (Exception ignored) {}
+                  timer = null;
+
+                  try { if (pendingResume != null) handler.removeCallbacks(pendingResume); } catch (Exception ignored) {}
+                  pendingResume = null;
               }
 
               private Notification buildNotification() {
@@ -802,14 +854,13 @@ jobs:
               @Override
               public void onDestroy() {
                   super.onDestroy();
-                  try { unregisterReceiver(sizeReceiver); } catch (Exception ignored) {}
-                  if (timer != null) timer.cancel();
+                  cancelTimerAndPending();
 
                   if (overlayView != null) {
-                      windowManager.removeView(overlayView);
+                      try { windowManager.removeView(overlayView); } catch (Exception ignored) {}
                       overlayView = null;
                   }
-                  hideRedScreen();
+                  hideRedScreenSafe();
               }
 
               private static int clamp(int v, int lo, int hi) {
