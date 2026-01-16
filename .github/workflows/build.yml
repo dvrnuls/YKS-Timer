@@ -262,7 +262,6 @@ jobs:
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
-                  <!-- max=99 => value = progress+1 -->
                   <SeekBar
                       android:id="@+id/seekSize"
                       android:layout_width="match_parent"
@@ -301,7 +300,6 @@ jobs:
           </ScrollView>
           EOF
 
-          # Root catches touch; content is scaled (no clipping) + touch remapped (no offset)
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -575,6 +573,7 @@ jobs:
           import android.view.LayoutInflater;
           import android.view.MotionEvent;
           import android.view.View;
+          import android.view.ViewGroup;
           import android.view.WindowManager;
           import android.view.WindowMetrics;
           import android.widget.Button;
@@ -682,6 +681,16 @@ jobs:
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
 
+                      // IMPORTANT: avoid clipping when scaled + rounding
+                      if (overlayView instanceof ViewGroup) {
+                          ((ViewGroup) overlayView).setClipChildren(false);
+                          ((ViewGroup) overlayView).setClipToPadding(false);
+                      }
+                      if (overlayContent instanceof ViewGroup) {
+                          ((ViewGroup) overlayContent).setClipChildren(false);
+                          ((ViewGroup) overlayContent).setClipToPadding(false);
+                      }
+
                       windowManager.addView(overlayView, overlayParams);
 
                       final View dragHandle = overlayView.findViewById(R.id.dragHandle);
@@ -696,7 +705,6 @@ jobs:
                       btnNext.setOnClickListener(v -> nextQuestion());
                       btnClose.setOnClickListener(v -> stopCompletely());
 
-                      // After layout: capture base sizes, then apply scale + window size
                       overlayView.post(() -> {
                           if (overlayView == null || overlayContent == null) return;
                           baseContentW = overlayContent.getWidth();
@@ -706,7 +714,6 @@ jobs:
                           clampOverlayToScreen();
                       });
 
-                      // Root touch: drag uses RAW coords; clicks go to content with scaled coords remapped.
                       overlayView.setOnTouchListener(new View.OnTouchListener() {
                           private boolean dragging = false;
                           private int startX, startY;
@@ -719,8 +726,7 @@ jobs:
                               float scale = sizePercent / 100.0f;
                               if (scale <= 0f) scale = 1f;
 
-                              // If baseHandleH not ready, assume ~120px for safe drag detection
-                              int handlePx = (baseHandleH > 0) ? Math.round(baseHandleH * scale) : 120;
+                              int handlePx = (baseHandleH > 0) ? (int) Math.ceil(baseHandleH * scale) : 120;
 
                               switch (e.getAction()) {
                                   case MotionEvent.ACTION_DOWN: {
@@ -775,7 +781,6 @@ jobs:
               private boolean dispatchToScaledContent(MotionEvent e, float scale) {
                   try {
                       MotionEvent ev = MotionEvent.obtain(e);
-                      // Map touch from scaled window coords -> unscaled content coords
                       ev.setLocation(e.getX() / scale, e.getY() / scale);
                       boolean handled = overlayContent.dispatchTouchEvent(ev);
                       ev.recycle();
@@ -791,7 +796,6 @@ jobs:
                   float scale = sizePercent / 100.0f;
                   if (scale <= 0f) scale = 1f;
 
-                  // Ensure base sizes exist
                   if (baseContentW <= 0 || baseContentH <= 0) {
                       overlayContent.measure(
                               View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
@@ -802,15 +806,15 @@ jobs:
                   }
                   if (baseContentW <= 0 || baseContentH <= 0) return;
 
-                  // Scale drawing
                   overlayContent.setPivotX(0f);
                   overlayContent.setPivotY(0f);
                   overlayContent.setScaleX(scale);
                   overlayContent.setScaleY(scale);
 
-                  // Match window size to scaled content so nothing disappears
-                  overlayParams.width  = Math.max(1, Math.round(baseContentW * scale));
-                  overlayParams.height = Math.max(1, Math.round(baseContentH * scale));
+                  // IMPORTANT: use CEIL + small padding to prevent clipping at <100%
+                  int pad = (int) (8f * getResources().getDisplayMetrics().density + 0.5f);
+                  overlayParams.width  = Math.max(1, (int) Math.ceil(baseContentW * scale) + pad);
+                  overlayParams.height = Math.max(1, (int) Math.ceil(baseContentH * scale) + pad);
 
                   try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
@@ -914,7 +918,7 @@ jobs:
 
                       Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
                       btnSkip.setOnClickListener(v -> {
-                          hideRedScreenSafe();   // immediate close
+                          hideRedScreenSafe();
                           cancelTimerAndPending();
                           pendingResume = () -> {
                               totalSeconds = initialSeconds;
@@ -973,7 +977,6 @@ jobs:
                   pendingResume = null;
               }
 
-              // ----- Clamp -----
               private void clampOverlayToScreen() {
                   if (overlayView == null || overlayParams == null) return;
                   setOverlayPositionClamped(overlayParams.x, overlayParams.y);
