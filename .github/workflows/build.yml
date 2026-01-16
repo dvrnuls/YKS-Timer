@@ -306,7 +306,8 @@ jobs:
               android:id="@+id/rootOverlay"
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
-              android:clickable="true">
+              android:clickable="true"
+              android:padding="6dp">
 
               <LinearLayout
                   android:id="@+id/overlayContent"
@@ -602,6 +603,7 @@ jobs:
 
               private int sizePercent = 70;
 
+              // Base (UNSCALED) measurements
               private int baseContentW = 0;
               private int baseContentH = 0;
               private int baseHandleH  = 0;
@@ -626,7 +628,7 @@ jobs:
                   if (ACTION_UPDATE_SIZE.equals(action)) {
                       int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
                       sizePercent = clamp(s, 1, 100);
-                      applyScaleAndWindowSize();
+                      applyScaleOnlyKeepWindowBig();   // KEY FIX
                       clampOverlayToScreen();
                       return START_NOT_STICKY;
                   }
@@ -646,7 +648,7 @@ jobs:
                               return START_NOT_STICKY;
                           }
                       } else {
-                          applyScaleAndWindowSize();
+                          applyScaleOnlyKeepWindowBig();
                           updateTimerText();
                           updateToggleText();
                           clampOverlayToScreen();
@@ -681,7 +683,7 @@ jobs:
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
 
-                      // IMPORTANT: avoid clipping when scaled + rounding
+                      // Avoid clipping
                       if (overlayView instanceof ViewGroup) {
                           ((ViewGroup) overlayView).setClipChildren(false);
                           ((ViewGroup) overlayView).setClipToPadding(false);
@@ -707,13 +709,18 @@ jobs:
 
                       overlayView.post(() -> {
                           if (overlayView == null || overlayContent == null) return;
+
+                          // Capture UNSCALED base sizes once
                           baseContentW = overlayContent.getWidth();
                           baseContentH = overlayContent.getHeight();
                           baseHandleH  = dragHandle.getHeight();
-                          applyScaleAndWindowSize();
+
+                          // Keep window big (unscaled) forever, only scale drawing
+                          applyScaleOnlyKeepWindowBig();
                           clampOverlayToScreen();
                       });
 
+                      // Touch: drag in header; clicks remapped to scaled content
                       overlayView.setOnTouchListener(new View.OnTouchListener() {
                           private boolean dragging = false;
                           private int startX, startY;
@@ -790,7 +797,10 @@ jobs:
                   }
               }
 
-              private void applyScaleAndWindowSize() {
+              // KEY FIX:
+              // - Only scale overlayContent drawing
+              // - Keep overlay window size ALWAYS unscaled (so nothing can be clipped at small %)
+              private void applyScaleOnlyKeepWindowBig() {
                   if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
                   float scale = sizePercent / 100.0f;
@@ -811,10 +821,10 @@ jobs:
                   overlayContent.setScaleX(scale);
                   overlayContent.setScaleY(scale);
 
-                  // IMPORTANT: use CEIL + small padding to prevent clipping at <100%
-                  int pad = (int) (8f * getResources().getDisplayMetrics().density + 0.5f);
-                  overlayParams.width  = Math.max(1, (int) Math.ceil(baseContentW * scale) + pad);
-                  overlayParams.height = Math.max(1, (int) Math.ceil(baseContentH * scale) + pad);
+                  // Keep window at base size + safe padding
+                  int pad = (int) (18f * getResources().getDisplayMetrics().density + 0.5f);
+                  overlayParams.width  = Math.max(1, baseContentW + pad);
+                  overlayParams.height = Math.max(1, baseContentH + pad);
 
                   try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
