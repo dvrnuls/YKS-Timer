@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -18,8 +19,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      # IMPORTANT: do NOT enable Gradle cache here (repo may be empty)
-      - name: Install Gradle
+      - name: Install Gradle 8.2
         shell: bash
         run: |
           set -euo pipefail
@@ -34,15 +34,14 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import os, struct, zlib, binascii
 
-          def w(path: str, content: str):
+          def write_text(path: str, content: str):
               p = Path(path)
               p.parent.mkdir(parents=True, exist_ok=True)
               p.write_text(content, encoding="utf-8")
 
-          # AAPT2-safe launcher icons (solid PNG)
           def write_png(path: str, wpx: int=48, hpx: int=48, rgba=(25,118,210,255)):
-              import os, struct, zlib, binascii
               r,g,b,a = rgba
               raw = b"".join((b"\x00" + bytes([r,g,b,a]) * wpx) for _ in range(hpx))
               comp = zlib.compress(raw, 9)
@@ -51,11 +50,12 @@ jobs:
                           struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
               sig = b"\x89PNG\r\n\x1a\n"
               ihdr = struct.pack(">IIBBBBB", wpx, hpx, 8, 6, 0, 0, 0)
-              data = sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", comp) + chunk(b"IEND", b"")
+              png = sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", comp) + chunk(b"IEND", b"")
               os.makedirs(os.path.dirname(path), exist_ok=True)
               with open(path, "wb") as f:
-                  f.write(data)
+                  f.write(png)
 
+          # Launcher icons (AAPT2-safe)
           for d in [
               "app/src/main/res/mipmap-mdpi",
               "app/src/main/res/mipmap-hdpi",
@@ -66,14 +66,13 @@ jobs:
               write_png(f"{d}/ic_launcher.png")
               write_png(f"{d}/ic_launcher_round.png")
 
-          w("build.gradle", """\
-          plugins {
+          # Root build.gradle (AGP only, no Kotlin)
+          write_text("build.gradle", """plugins {
               id 'com.android.application' version '8.2.2' apply false
           }
           """)
 
-          w("settings.gradle", """\
-          pluginManagement {
+          write_text("settings.gradle", """pluginManagement {
               repositories {
                   google()
                   mavenCentral()
@@ -91,14 +90,12 @@ jobs:
           include ':app'
           """)
 
-          w("gradle.properties", """\
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          write_text("gradle.properties", """org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=false
           android.enableJetifier=false
           """)
 
-          w("app/build.gradle", """\
-          plugins { id 'com.android.application' }
+          write_text("app/build.gradle", """plugins { id 'com.android.application' }
 
           android {
               namespace 'com.yks.timer'
@@ -128,15 +125,14 @@ jobs:
           }
           """)
 
-          w("app/src/main/AndroidManifest.xml", """\
-          <?xml version="1.0" encoding="utf-8"?>
+          # Manifest: NO INTERNET permission
+          write_text("app/src/main/AndroidManifest.xml", """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <!-- No INTERNET permission -->
 
               <application
                   android:allowBackup="true"
@@ -164,8 +160,7 @@ jobs:
           </manifest>
           """)
 
-          w("app/src/main/res/values/strings.xml", """\
-          <?xml version="1.0" encoding="utf-8"?>
+          write_text("app/src/main/res/values/strings.xml", """<?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">YKS Sayaç</string>
 
@@ -184,8 +179,7 @@ jobs:
           </resources>
           """)
 
-          w("app/src/main/res/layout/activity_main.xml", """\
-          <?xml version="1.0" encoding="utf-8"?>
+          write_text("app/src/main/res/layout/activity_main.xml", """<?xml version="1.0" encoding="utf-8"?>
           <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent">
@@ -254,7 +248,7 @@ jobs:
                       android:id="@+id/tvSize"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Boyut: 60"
+                      android:text="Boyut: 55"
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
@@ -263,7 +257,7 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
                       android:max="99"
-                      android:progress="59"
+                      android:progress="54"
                       android:layout_marginBottom="10dp" />
 
                   <Button
@@ -296,8 +290,7 @@ jobs:
           </ScrollView>
           """)
 
-          w("app/src/main/res/layout/overlay_timer.xml", """\
-          <?xml version="1.0" encoding="utf-8"?>
+          write_text("app/src/main/res/layout/overlay_timer.xml", """<?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:id="@+id/rootOverlay"
               android:layout_width="wrap_content"
@@ -373,8 +366,7 @@ jobs:
           </FrameLayout>
           """)
 
-          w("app/src/main/res/layout/red_screen.xml", """\
-          <?xml version="1.0" encoding="utf-8"?>
+          write_text("app/src/main/res/layout/red_screen.xml", """<?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:layout_width="match_parent"
               android:layout_height="match_parent"
@@ -406,8 +398,7 @@ jobs:
           </FrameLayout>
           """)
 
-          w("app/src/main/java/com/yks/timer/MainActivity.java", """\
-          package com.yks.timer;
+          write_text("app/src/main/java/com/yks/timer/MainActivity.java", """package com.yks.timer;
 
           import android.Manifest;
           import android.app.Activity;
@@ -431,7 +422,7 @@ jobs:
 
               private static final String PREFS = "yks_timer_prefs";
               private static final String KEY_SIZE = "overlay_size"; // 1..100
-              private static final int DEFAULT_SIZE = 60;
+              private static final int DEFAULT_SIZE = 55;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -547,8 +538,7 @@ jobs:
           }
           """)
 
-          w("app/src/main/java/com/yks/timer/TimerService.java", """\
-          package com.yks.timer;
+          write_text("app/src/main/java/com/yks/timer/TimerService.java", """package com.yks.timer;
 
           import android.app.Notification;
           import android.app.NotificationChannel;
@@ -597,7 +587,7 @@ jobs:
               private long initialSeconds = 60;
               private boolean isPaused = false;
 
-              private int sizePercent = 60;
+              private int sizePercent = 55;
 
               private int baseContentW = 0;
               private int baseContentH = 0;
@@ -624,7 +614,7 @@ jobs:
                   String action = (intent != null) ? intent.getAction() : null;
 
                   if (ACTION_UPDATE_SIZE.equals(action)) {
-                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 60) : 60;
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 55) : 55;
                       sizePercent = clamp(s, 1, 100);
                       applyScaleOnlyKeepWindowBig();
                       clampOverlayToScreen();
@@ -637,7 +627,7 @@ jobs:
                       totalSeconds = initialSeconds;
                       isPaused = false;
 
-                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 60) : 60;
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 55) : 55;
                       sizePercent = clamp(s, 1, 100);
 
                       if (overlayView == null) {
@@ -803,7 +793,7 @@ jobs:
               }
 
               // Keep window big (unscaled) so nothing clips.
-              // Then, when window is at right/bottom edges, shift content inside so VISIBLE part reaches the edge.
+              // When window hits right/bottom edges, shift content inside so VISIBLE part reaches the edge.
               private void applyScaleOnlyKeepWindowBig() {
                   if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
@@ -851,7 +841,6 @@ jobs:
                   int maxX = Math.max(0, screenW - w);
                   int maxY = Math.max(0, screenH - h);
 
-                  // usable inner area (exclude rootOverlay padding)
                   int padL = overlayView.getPaddingLeft();
                   int padR = overlayView.getPaddingRight();
                   int padT = overlayView.getPaddingTop();
@@ -1126,10 +1115,15 @@ jobs:
                   return v;
               }
           }
+          """)
+
           PY
 
       - name: Build Debug APK (installable)
-        run: gradle :app:assembleDebug --no-daemon
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -1137,4 +1131,3 @@ jobs:
           name: YKS-Timer-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-```0
