@@ -71,16 +71,25 @@ jobs:
           PY
 
           cat > build.gradle << 'EOF'
-          plugins { id 'com.android.application' version '8.2.2' apply false }
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
           EOF
 
           cat > settings.gradle << 'EOF'
           pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
           }
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories { google(); mavenCentral() }
+              repositories {
+                  google()
+                  mavenCentral()
+              }
           }
           rootProject.name = "YKS-Timer"
           include ':app'
@@ -118,12 +127,15 @@ jobs:
               }
           }
 
-          dependencies { }
+          dependencies {
+              // No third-party libs. No networking libs.
+          }
           EOF
 
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -152,6 +164,7 @@ jobs:
                       android:exported="false"
                       android:foregroundServiceType="dataSync" />
               </application>
+
           </manifest>
           EOF
 
@@ -159,14 +172,17 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <string name="app_name">YKS Sayaç</string>
+
               <string name="btn_start">Başlat</string>
               <string name="btn_pause">Duraklat</string>
               <string name="btn_reset">Sıfırla</string>
               <string name="btn_next">Sonraki</string>
               <string name="btn_close">Kapat</string>
+
               <string name="btn_apply_size">Boyutu Uygula</string>
               <string name="btn_main_start">Sayacı Başlat</string>
               <string name="btn_main_stop">Durdur</string>
+
               <string name="time_up">SÜRE DOLDU!</string>
               <string name="skip">Soruyu Geç</string>
           </resources>
@@ -246,6 +262,7 @@ jobs:
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
+                  <!-- max=99 => value = progress+1 -->
                   <SeekBar
                       android:id="@+id/seekSize"
                       android:layout_width="match_parent"
@@ -284,74 +301,81 @@ jobs:
           </ScrollView>
           EOF
 
+          # Root catches touch; content is scaled (no clipping) + touch remapped (no offset)
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:id="@+id/rootOverlay"
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
-              android:orientation="vertical"
-              android:background="#FFFFFFFF"
               android:clickable="true">
 
               <LinearLayout
-                  android:id="@+id/dragHandle"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"
-                  android:orientation="vertical"
-                  android:padding="10dp"
-                  android:background="#EEEEEE"
-                  android:clickable="true">
-
-                  <TextView
-                      android:id="@+id/tvTimer"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="01:00"
-                      android:textSize="22sp"
-                      android:textStyle="bold" />
-
-                  <TextView
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="(Sürüklemek için buradan tut)"
-                      android:textSize="10sp" />
-              </LinearLayout>
-
-              <LinearLayout
+                  android:id="@+id/overlayContent"
                   android:layout_width="wrap_content"
                   android:layout_height="wrap_content"
-                  android:orientation="horizontal"
-                  android:padding="8dp">
+                  android:orientation="vertical"
+                  android:background="#FFFFFFFF">
 
-                  <Button
-                      android:id="@+id/btnToggle"
+                  <LinearLayout
+                      android:id="@+id/dragHandle"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="vertical"
+                      android:padding="10dp"
+                      android:background="#EEEEEE">
+
+                      <TextView
+                          android:id="@+id/tvTimer"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="01:00"
+                          android:textSize="22sp"
+                          android:textStyle="bold" />
+
+                      <TextView
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="(Sürüklemek için buradan tut)"
+                          android:textSize="10sp" />
+                  </LinearLayout>
+
+                  <LinearLayout
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="@string/btn_pause" />
+                      android:orientation="horizontal"
+                      android:padding="8dp">
 
-                  <Button
-                      android:id="@+id/btnReset"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="@string/btn_reset"
-                      android:layout_marginStart="6dp"/>
+                      <Button
+                          android:id="@+id/btnToggle"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="@string/btn_pause" />
 
-                  <Button
-                      android:id="@+id/btnNext"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="@string/btn_next"
-                      android:layout_marginStart="6dp"/>
+                      <Button
+                          android:id="@+id/btnReset"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="@string/btn_reset"
+                          android:layout_marginStart="6dp"/>
 
-                  <Button
-                      android:id="@+id/btnClose"
-                      android:layout_width="wrap_content"
-                      android:layout_height="wrap_content"
-                      android:text="@string/btn_close"
-                      android:layout_marginStart="6dp"/>
+                      <Button
+                          android:id="@+id/btnNext"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="@string/btn_next"
+                          android:layout_marginStart="6dp"/>
+
+                      <Button
+                          android:id="@+id/btnClose"
+                          android:layout_width="wrap_content"
+                          android:layout_height="wrap_content"
+                          android:text="@string/btn_close"
+                          android:layout_marginStart="6dp"/>
+                  </LinearLayout>
+
               </LinearLayout>
-          </LinearLayout>
+          </FrameLayout>
           EOF
 
           cat > app/src/main/res/layout/red_screen.xml << 'EOF'
@@ -567,7 +591,8 @@ jobs:
               private static final String CHANNEL_ID = "timer_channel";
 
               private WindowManager windowManager;
-              private View overlayView;
+              private View overlayView;       // rootOverlay
+              private View overlayContent;    // scaled content
               private View redScreenView;
               private WindowManager.LayoutParams overlayParams;
 
@@ -578,9 +603,9 @@ jobs:
 
               private int sizePercent = 70;
 
-              // Base (unscaled) size snapshot in px
-              private int baseW = 0;
-              private int baseH = 0;
+              private int baseContentW = 0;
+              private int baseContentH = 0;
+              private int baseHandleH  = 0;
 
               private final Handler handler = new Handler();
               private Runnable pendingResume;
@@ -602,7 +627,7 @@ jobs:
                   if (ACTION_UPDATE_SIZE.equals(action)) {
                       int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
                       sizePercent = clamp(s, 1, 100);
-                      applyOverlaySize();     // real layout size update (no scale transform)
+                      applyScaleAndWindowSize();
                       clampOverlayToScreen();
                       return START_NOT_STICKY;
                   }
@@ -622,9 +647,9 @@ jobs:
                               return START_NOT_STICKY;
                           }
                       } else {
+                          applyScaleAndWindowSize();
                           updateTimerText();
                           updateToggleText();
-                          applyOverlaySize();
                           clampOverlayToScreen();
                       }
 
@@ -655,17 +680,9 @@ jobs:
                       overlayParams.y = 120;
 
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
+                      overlayContent = overlayView.findViewById(R.id.overlayContent);
 
                       windowManager.addView(overlayView, overlayParams);
-
-                      // Snapshot base size after first layout
-                      overlayView.post(() -> {
-                          if (overlayView == null) return;
-                          baseW = overlayView.getWidth();
-                          baseH = overlayView.getHeight();
-                          applyOverlaySize();
-                          clampOverlayToScreen();
-                      });
 
                       final View dragHandle = overlayView.findViewById(R.id.dragHandle);
 
@@ -674,41 +691,74 @@ jobs:
                       final Button btnNext   = overlayView.findViewById(R.id.btnNext);
                       final Button btnClose  = overlayView.findViewById(R.id.btnClose);
 
-                      dragHandle.setOnTouchListener(new View.OnTouchListener() {
-                          private int startX, startY;
-                          private float startRawX, startRawY;
-                          @Override
-                          public boolean onTouch(View v, MotionEvent e) {
-                              if (overlayParams == null) return false;
-                              switch (e.getAction()) {
-                                  case MotionEvent.ACTION_DOWN:
-                                      startX = overlayParams.x;
-                                      startY = overlayParams.y;
-                                      startRawX = e.getRawX();
-                                      startRawY = e.getRawY();
-                                      return true;
-                                  case MotionEvent.ACTION_MOVE:
-                                      int dx = (int) (e.getRawX() - startRawX);
-                                      int dy = (int) (e.getRawY() - startRawY);
-                                      setOverlayPositionClamped(startX + dx, startY + dy);
-                                      return true;
-                                  case MotionEvent.ACTION_UP:
-                                  case MotionEvent.ACTION_CANCEL:
-                                      return true;
-                                  default:
-                                      return true;
-                              }
-                          }
-                      });
-
-                      btnToggle.setOnClickListener(v -> {
-                          if (isPaused) resumeTimer();
-                          else pauseTimer();
-                      });
-
+                      btnToggle.setOnClickListener(v -> { if (isPaused) resumeTimer(); else pauseTimer(); });
                       btnReset.setOnClickListener(v -> resetTimer());
                       btnNext.setOnClickListener(v -> nextQuestion());
                       btnClose.setOnClickListener(v -> stopCompletely());
+
+                      // After layout: capture base sizes, then apply scale + window size
+                      overlayView.post(() -> {
+                          if (overlayView == null || overlayContent == null) return;
+                          baseContentW = overlayContent.getWidth();
+                          baseContentH = overlayContent.getHeight();
+                          baseHandleH  = dragHandle.getHeight();
+                          applyScaleAndWindowSize();
+                          clampOverlayToScreen();
+                      });
+
+                      // Root touch: drag uses RAW coords; clicks go to content with scaled coords remapped.
+                      overlayView.setOnTouchListener(new View.OnTouchListener() {
+                          private boolean dragging = false;
+                          private int startX, startY;
+                          private float startRawX, startRawY;
+
+                          @Override
+                          public boolean onTouch(View v, MotionEvent e) {
+                              if (overlayParams == null || overlayContent == null) return false;
+
+                              float scale = sizePercent / 100.0f;
+                              if (scale <= 0f) scale = 1f;
+
+                              // If baseHandleH not ready, assume ~120px for safe drag detection
+                              int handlePx = (baseHandleH > 0) ? Math.round(baseHandleH * scale) : 120;
+
+                              switch (e.getAction()) {
+                                  case MotionEvent.ACTION_DOWN: {
+                                      dragging = (e.getY() <= handlePx);
+                                      if (dragging) {
+                                          startX = overlayParams.x;
+                                          startY = overlayParams.y;
+                                          startRawX = e.getRawX();
+                                          startRawY = e.getRawY();
+                                          return true;
+                                      } else {
+                                          return dispatchToScaledContent(e, scale);
+                                      }
+                                  }
+                                  case MotionEvent.ACTION_MOVE: {
+                                      if (dragging) {
+                                          int dx = (int) (e.getRawX() - startRawX);
+                                          int dy = (int) (e.getRawY() - startRawY);
+                                          setOverlayPositionClamped(startX + dx, startY + dy);
+                                          return true;
+                                      } else {
+                                          return dispatchToScaledContent(e, scale);
+                                      }
+                                  }
+                                  case MotionEvent.ACTION_UP:
+                                  case MotionEvent.ACTION_CANCEL: {
+                                      if (dragging) {
+                                          dragging = false;
+                                          return true;
+                                      } else {
+                                          return dispatchToScaledContent(e, scale);
+                                      }
+                                  }
+                                  default:
+                                      return dispatchToScaledContent(e, scale);
+                              }
+                          }
+                      });
 
                       updateTimerText();
                       updateToggleText();
@@ -716,32 +766,51 @@ jobs:
 
                   } catch (Exception e) {
                       overlayView = null;
+                      overlayContent = null;
                       overlayParams = null;
                       return false;
                   }
               }
 
-              private void applyOverlaySize() {
-                  if (overlayView == null || overlayParams == null) return;
+              private boolean dispatchToScaledContent(MotionEvent e, float scale) {
+                  try {
+                      MotionEvent ev = MotionEvent.obtain(e);
+                      // Map touch from scaled window coords -> unscaled content coords
+                      ev.setLocation(e.getX() / scale, e.getY() / scale);
+                      boolean handled = overlayContent.dispatchTouchEvent(ev);
+                      ev.recycle();
+                      return handled;
+                  } catch (Exception ex) {
+                      return false;
+                  }
+              }
 
-                  // If base not captured yet, try measure once
-                  if (baseW <= 0 || baseH <= 0) {
-                      overlayView.measure(
+              private void applyScaleAndWindowSize() {
+                  if (overlayView == null || overlayContent == null || overlayParams == null) return;
+
+                  float scale = sizePercent / 100.0f;
+                  if (scale <= 0f) scale = 1f;
+
+                  // Ensure base sizes exist
+                  if (baseContentW <= 0 || baseContentH <= 0) {
+                      overlayContent.measure(
                               View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
                               View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
                       );
-                      baseW = overlayView.getMeasuredWidth();
-                      baseH = overlayView.getMeasuredHeight();
+                      baseContentW = overlayContent.getMeasuredWidth();
+                      baseContentH = overlayContent.getMeasuredHeight();
                   }
+                  if (baseContentW <= 0 || baseContentH <= 0) return;
 
-                  if (baseW <= 0 || baseH <= 0) return;
+                  // Scale drawing
+                  overlayContent.setPivotX(0f);
+                  overlayContent.setPivotY(0f);
+                  overlayContent.setScaleX(scale);
+                  overlayContent.setScaleY(scale);
 
-                  float f = sizePercent / 100.0f;
-                  int w = Math.max(1, Math.round(baseW * f));
-                  int h = Math.max(1, Math.round(baseH * f));
-
-                  overlayParams.width = w;
-                  overlayParams.height = h;
+                  // Match window size to scaled content so nothing disappears
+                  overlayParams.width  = Math.max(1, Math.round(baseContentW * scale));
+                  overlayParams.height = Math.max(1, Math.round(baseContentH * scale));
 
                   try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
@@ -753,6 +822,7 @@ jobs:
                       if (overlayView != null) {
                           windowManager.removeView(overlayView);
                           overlayView = null;
+                          overlayContent = null;
                       }
                   } catch (Exception ignored) {}
 
@@ -844,7 +914,7 @@ jobs:
 
                       Button btnSkip = redScreenView.findViewById(R.id.btnSkip);
                       btnSkip.setOnClickListener(v -> {
-                          hideRedScreenSafe();
+                          hideRedScreenSafe();   // immediate close
                           cancelTimerAndPending();
                           pendingResume = () -> {
                               totalSeconds = initialSeconds;
@@ -903,7 +973,7 @@ jobs:
                   pendingResume = null;
               }
 
-              // Clamp using REAL window size (overlayParams.width/height)
+              // ----- Clamp -----
               private void clampOverlayToScreen() {
                   if (overlayView == null || overlayParams == null) return;
                   setOverlayPositionClamped(overlayParams.x, overlayParams.y);
@@ -980,8 +1050,11 @@ jobs:
               public void onDestroy() {
                   super.onDestroy();
                   try { cancelTimerAndPending(); } catch (Exception ignored) {}
+
                   try { if (overlayView != null) windowManager.removeView(overlayView); } catch (Exception ignored) {}
                   overlayView = null;
+                  overlayContent = null;
+
                   try { if (redScreenView != null) windowManager.removeView(redScreenView); } catch (Exception ignored) {}
                   redScreenView = null;
               }
