@@ -258,7 +258,7 @@ jobs:
                       android:id="@+id/tvSize"
                       android:layout_width="wrap_content"
                       android:layout_height="wrap_content"
-                      android:text="Boyut: 70"
+                      android:text="Boyut: 60"
                       android:textSize="14sp"
                       android:layout_marginBottom="6dp"/>
 
@@ -267,7 +267,7 @@ jobs:
                       android:layout_width="match_parent"
                       android:layout_height="wrap_content"
                       android:max="99"
-                      android:progress="69"
+                      android:progress="59"
                       android:layout_marginBottom="10dp" />
 
                   <Button
@@ -435,7 +435,7 @@ jobs:
 
               private static final String PREFS = "yks_timer_prefs";
               private static final String KEY_SIZE = "overlay_size"; // 1..100
-              private static final int DEFAULT_SIZE = 70;
+              private static final int DEFAULT_SIZE = 60;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -591,8 +591,8 @@ jobs:
               private static final String CHANNEL_ID = "timer_channel";
 
               private WindowManager windowManager;
-              private View overlayView;       // rootOverlay
-              private View overlayContent;    // scaled content
+              private View overlayView;
+              private View overlayContent;
               private View redScreenView;
               private WindowManager.LayoutParams overlayParams;
 
@@ -601,12 +601,14 @@ jobs:
               private long initialSeconds = 60;
               private boolean isPaused = false;
 
-              private int sizePercent = 70;
+              private int sizePercent = 60;
 
-              // Base (UNSCALED) measurements
               private int baseContentW = 0;
               private int baseContentH = 0;
               private int baseHandleH  = 0;
+
+              private int lastScaledW = 0;
+              private int lastScaledH = 0;
 
               private final Handler handler = new Handler();
               private Runnable pendingResume;
@@ -626,10 +628,10 @@ jobs:
                   String action = (intent != null) ? intent.getAction() : null;
 
                   if (ACTION_UPDATE_SIZE.equals(action)) {
-                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 60) : 60;
                       sizePercent = clamp(s, 1, 100);
                       applyScaleOnlyKeepWindowBig();
-                      clampOverlayToScreen(); // UPDATED clamp uses scaled visible size
+                      clampOverlayToScreen();
                       return START_NOT_STICKY;
                   }
 
@@ -639,7 +641,7 @@ jobs:
                       totalSeconds = initialSeconds;
                       isPaused = false;
 
-                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 70) : 70;
+                      int s = (intent != null) ? intent.getIntExtra(EXTRA_OVERLAY_SIZE, 60) : 60;
                       sizePercent = clamp(s, 1, 100);
 
                       if (overlayView == null) {
@@ -701,6 +703,7 @@ jobs:
                       final Button btnNext   = overlayView.findViewById(R.id.btnNext);
                       final Button btnClose  = overlayView.findViewById(R.id.btnClose);
 
+                      // Start/Pause is ONE button
                       btnToggle.setOnClickListener(v -> { if (isPaused) resumeTimer(); else pauseTimer(); });
                       btnReset.setOnClickListener(v -> resetTimer());
                       btnNext.setOnClickListener(v -> nextQuestion());
@@ -724,16 +727,20 @@ jobs:
 
                           @Override
                           public boolean onTouch(View v, MotionEvent e) {
-                              if (overlayParams == null || overlayContent == null) return false;
+                              if (overlayParams == null || overlayContent == null) return true;
 
                               float scale = sizePercent / 100.0f;
                               if (scale <= 0f) scale = 1f;
 
+                              float contentX = overlayContent.getX();
+                              float contentY = overlayContent.getY();
+
+                              float localY = e.getY() - contentY;
                               int handlePx = (baseHandleH > 0) ? (int) Math.ceil(baseHandleH * scale) : 120;
 
                               switch (e.getAction()) {
                                   case MotionEvent.ACTION_DOWN: {
-                                      dragging = (e.getY() <= handlePx);
+                                      dragging = (localY >= 0f && localY <= handlePx);
                                       if (dragging) {
                                           startX = overlayParams.x;
                                           startY = overlayParams.y;
@@ -741,7 +748,8 @@ jobs:
                                           startRawY = e.getRawY();
                                           return true;
                                       } else {
-                                          return dispatchToScaledContent(e, scale);
+                                          dispatchToScaledContent(e, scale, contentX, contentY);
+                                          return true;
                                       }
                                   }
                                   case MotionEvent.ACTION_MOVE: {
@@ -751,7 +759,8 @@ jobs:
                                           setOverlayPositionClamped(startX + dx, startY + dy);
                                           return true;
                                       } else {
-                                          return dispatchToScaledContent(e, scale);
+                                          dispatchToScaledContent(e, scale, contentX, contentY);
+                                          return true;
                                       }
                                   }
                                   case MotionEvent.ACTION_UP:
@@ -760,11 +769,14 @@ jobs:
                                           dragging = false;
                                           return true;
                                       } else {
-                                          return dispatchToScaledContent(e, scale);
+                                          dispatchToScaledContent(e, scale, contentX, contentY);
+                                          return true;
                                       }
                                   }
-                                  default:
-                                      return dispatchToScaledContent(e, scale);
+                                  default: {
+                                      dispatchToScaledContent(e, scale, contentX, contentY);
+                                      return true;
+                                  }
                               }
                           }
                       });
@@ -781,19 +793,23 @@ jobs:
                   }
               }
 
-              private boolean dispatchToScaledContent(MotionEvent e, float scale) {
+              private void dispatchToScaledContent(MotionEvent e, float scale, float contentX, float contentY) {
                   try {
                       MotionEvent ev = MotionEvent.obtain(e);
-                      ev.setLocation(e.getX() / scale, e.getY() / scale);
-                      boolean handled = overlayContent.dispatchTouchEvent(ev);
+                      float lx = (e.getX() - contentX) / scale;
+                      float ly = (e.getY() - contentY) / scale;
+                      ev.setLocation(lx, ly);
+                      overlayContent.dispatchTouchEvent(ev);
                       ev.recycle();
-                      return handled;
-                  } catch (Exception ex) {
-                      return false;
-                  }
+                  } catch (Exception ignored) {}
               }
 
-              // Keep window big (unscaled) to prevent clipping; only scale drawing.
+              private int dp(int v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              // Keep window big (unscaled) so nothing clips.
+              // Then, when the window is at right/bottom edges, shift content inside so VISIBLE part reaches the edge.
               private void applyScaleOnlyKeepWindowBig() {
                   if (overlayView == null || overlayContent == null || overlayParams == null) return;
 
@@ -815,37 +831,108 @@ jobs:
                   overlayContent.setScaleX(scale);
                   overlayContent.setScaleY(scale);
 
-                  int pad = dp(18); // just safety; doesn't affect edge-align now (clamp uses scaled size)
+                  lastScaledW = (int) Math.ceil(baseContentW * scale);
+                  lastScaledH = (int) Math.ceil(baseContentH * scale);
+
+                  int pad = dp(18);
                   overlayParams.width  = Math.max(1, baseContentW + pad);
                   overlayParams.height = Math.max(1, baseContentH + pad);
 
                   try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+
+                  updateEdgeAnchors();
               }
 
-              private int dp(int v) {
-                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              private void updateEdgeAnchors() {
+                  if (overlayContent == null || overlayParams == null) return;
+
+                  int[] wh = getScreenSize();
+                  int screenW = wh[0];
+                  int screenH = wh[1];
+
+                  int w = overlayParams.width;
+                  int h = overlayParams.height;
+                  if (w <= 0 || h <= 0) return;
+
+                  int maxX = Math.max(0, screenW - w);
+                  int maxY = Math.max(0, screenH - h);
+
+                  float scale = sizePercent / 100.0f;
+                  if (scale <= 0f) scale = 1f;
+
+                  if (lastScaledW <= 0 || lastScaledH <= 0) {
+                      lastScaledW = (int) Math.ceil(baseContentW * scale);
+                      lastScaledH = (int) Math.ceil(baseContentH * scale);
+                  }
+
+                  int extraW = Math.max(0, w - baseContentW);
+                  int extraH = Math.max(0, h - baseContentH);
+
+                  int dx = Math.max(0, baseContentW - lastScaledW) + extraW;
+                  int dy = Math.max(0, baseContentH - lastScaledH) + extraH;
+
+                  int tol = dp(2);
+
+                  float tx = 0f;
+                  float ty = 0f;
+
+                  if (overlayParams.x >= (maxX - tol)) tx = dx;
+                  if (overlayParams.y >= (maxY - tol)) ty = dy;
+
+                  overlayContent.setTranslationX(tx);
+                  overlayContent.setTranslationY(ty);
               }
 
-              private void stopCompletely() {
-                  try { cancelTimerAndPending(); } catch (Exception ignored) {}
+              private void clampOverlayToScreen() {
+                  if (overlayView == null || overlayParams == null) return;
+                  setOverlayPositionClamped(overlayParams.x, overlayParams.y);
+              }
 
+              private void setOverlayPositionClamped(int x, int y) {
+                  if (overlayView == null || overlayParams == null) return;
+
+                  int[] wh = getScreenSize();
+                  int screenW = wh[0];
+                  int screenH = wh[1];
+
+                  int w = overlayParams.width;
+                  int h = overlayParams.height;
+
+                  if (w <= 0 || h <= 0) {
+                      overlayView.measure(
+                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                      );
+                      w = overlayView.getMeasuredWidth();
+                      h = overlayView.getMeasuredHeight();
+                  }
+
+                  int maxX = Math.max(0, screenW - w);
+                  int maxY = Math.max(0, screenH - h);
+
+                  overlayParams.x = clamp(x, 0, maxX);
+                  overlayParams.y = clamp(y, 0, maxY);
+
+                  try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+
+                  updateEdgeAnchors();
+              }
+
+              private int[] getScreenSize() {
                   try {
-                      if (overlayView != null) {
-                          windowManager.removeView(overlayView);
-                          overlayView = null;
-                          overlayContent = null;
+                      if (Build.VERSION.SDK_INT >= 30) {
+                          WindowMetrics m = windowManager.getCurrentWindowMetrics();
+                          Rect b = m.getBounds();
+                          return new int[]{ b.width(), b.height() };
+                      } else {
+                          Display d = windowManager.getDefaultDisplay();
+                          Point p = new Point();
+                          d.getRealSize(p);
+                          return new int[]{ p.x, p.y };
                       }
-                  } catch (Exception ignored) {}
-
-                  try {
-                      if (redScreenView != null) {
-                          windowManager.removeView(redScreenView);
-                          redScreenView = null;
-                      }
-                  } catch (Exception ignored) {}
-
-                  try { stopForeground(true); } catch (Exception ignored) {}
-                  try { stopSelf(); } catch (Exception ignored) {}
+                  } catch (Exception e) {
+                      return new int[]{ 1080, 1920 };
+                  }
               }
 
               private void startTimer() {
@@ -984,75 +1071,26 @@ jobs:
                   pendingResume = null;
               }
 
-              // UPDATED: clamp using SCALED VISIBLE CONTENT size (not the big window size)
-              private void clampOverlayToScreen() {
-                  if (overlayView == null || overlayParams == null) return;
-                  setOverlayPositionClamped(overlayParams.x, overlayParams.y);
-              }
+              private void stopCompletely() {
+                  try { cancelTimerAndPending(); } catch (Exception ignored) {}
 
-              private int[] getVisibleScaledSize() {
-                  float scale = sizePercent / 100.0f;
-                  if (scale <= 0f) scale = 1f;
-
-                  int w = baseContentW;
-                  int h = baseContentH;
-
-                  if (w <= 0 || h <= 0) {
-                      if (overlayContent != null) {
-                          overlayContent.measure(
-                                  View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                                  View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                          );
-                          w = overlayContent.getMeasuredWidth();
-                          h = overlayContent.getMeasuredHeight();
-                          if (w > 0) baseContentW = w;
-                          if (h > 0) baseContentH = h;
-                      }
-                  }
-
-                  int scaledW = (int) Math.ceil(w * scale);
-                  int scaledH = (int) Math.ceil(h * scale);
-
-                  // rootOverlay has 6dp padding; we allow it to go a bit offscreen if needed.
-                  // If you want padding also always on screen, add dp(12) here.
-                  return new int[]{ Math.max(1, scaledW), Math.max(1, scaledH) };
-              }
-
-              private void setOverlayPositionClamped(int x, int y) {
-                  if (overlayView == null || overlayParams == null) return;
-
-                  int[] wh = getScreenSize();
-                  int screenW = wh[0];
-                  int screenH = wh[1];
-
-                  int[] visible = getVisibleScaledSize();
-                  int vw = visible[0];
-                  int vh = visible[1];
-
-                  int maxX = Math.max(0, screenW - vw);
-                  int maxY = Math.max(0, screenH - vh);
-
-                  overlayParams.x = clamp(x, 0, maxX);
-                  overlayParams.y = clamp(y, 0, maxY);
-
-                  try { windowManager.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
-              }
-
-              private int[] getScreenSize() {
                   try {
-                      if (Build.VERSION.SDK_INT >= 30) {
-                          WindowMetrics m = windowManager.getCurrentWindowMetrics();
-                          Rect b = m.getBounds();
-                          return new int[]{ b.width(), b.height() };
-                      } else {
-                          Display d = windowManager.getDefaultDisplay();
-                          Point p = new Point();
-                          d.getRealSize(p);
-                          return new int[]{ p.x, p.y };
+                      if (overlayView != null) {
+                          windowManager.removeView(overlayView);
+                          overlayView = null;
+                          overlayContent = null;
                       }
-                  } catch (Exception e) {
-                      return new int[]{ 1080, 1920 };
-                  }
+                  } catch (Exception ignored) {}
+
+                  try {
+                      if (redScreenView != null) {
+                          windowManager.removeView(redScreenView);
+                          redScreenView = null;
+                      }
+                  } catch (Exception ignored) {}
+
+                  try { stopForeground(true); } catch (Exception ignored) {}
+                  try { stopSelf(); } catch (Exception ignored) {}
               }
 
               private Notification buildNotification() {
@@ -1099,7 +1137,7 @@ jobs:
           EOF
 
       - name: Build Debug APK (installable)
-        run: gradle :app:assembleDebug
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -1107,3 +1145,4 @@ jobs:
           name: YKS-Timer-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+```0
