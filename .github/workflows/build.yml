@@ -12,22 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Install Gradle (official distribution)
-        shell: bash
-        run: |
-          set -e
-          GRADLE_VERSION="8.2"
-          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
-          unzip -q gradle.zip
-          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
-
       - name: Generate project (repo can be empty)
         shell: bash
         run: |
@@ -46,19 +30,15 @@ jobs:
           # --- VALID PNG icons (AAPT2-safe), no external libs ---
           python3 - <<'PY'
           import os, struct, zlib, binascii
-
           def png_bytes(w, h, rgba):
               raw = b''.join((b'\x00' + rgba * w) for _ in range(h))
               comp = zlib.compress(raw, 9)
-
               def chunk(tag, data):
                   return (struct.pack(">I", len(data)) + tag + data +
                           struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
-
               sig = b'\x89PNG\r\n\x1a\n'
               ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
               return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', comp) + chunk(b'IEND', b'')
-
           data = png_bytes(48, 48, bytes([25, 118, 210, 255]))
           dirs = [
               "app/src/main/res/mipmap-mdpi",
@@ -139,7 +119,7 @@ jobs:
           }
           EOF
 
-          # --- AndroidManifest: NO INTERNET permission + correct FGS type/permission ---
+          # --- AndroidManifest: NO INTERNET permission + FGS type/permission ---
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -176,7 +156,6 @@ jobs:
           </manifest>
           EOF
 
-          # --- strings.xml ---
           cat > app/src/main/res/values/strings.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
@@ -184,7 +163,6 @@ jobs:
           </resources>
           EOF
 
-          # --- activity_main.xml ---
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -262,7 +240,6 @@ jobs:
           </LinearLayout>
           EOF
 
-          # --- overlay_timer.xml ---
           cat > app/src/main/res/layout/overlay_timer.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -323,7 +300,6 @@ jobs:
           </LinearLayout>
           EOF
 
-          # --- red_screen.xml ---
           cat > app/src/main/res/layout/red_screen.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -357,7 +333,6 @@ jobs:
           </FrameLayout>
           EOF
 
-          # --- MainActivity.java ---
           cat > app/src/main/java/com/yks/timer/MainActivity.java << 'EOF'
           package com.yks.timer;
 
@@ -451,7 +426,6 @@ jobs:
           }
           EOF
 
-          # --- TimerService.java ---
           cat > app/src/main/java/com/yks/timer/TimerService.java << 'EOF'
           package com.yks.timer;
 
@@ -510,9 +484,7 @@ jobs:
                       updateButtons();
                   }
 
-                  // Start immediately
                   startTimer();
-
                   return START_STICKY;
               }
 
@@ -694,14 +666,24 @@ jobs:
           }
           EOF
 
-      - name: Build Debug APK (installable)
-        run: gradle :app:assembleDebug
+      - name: Set up JDK 17 (now gradle files exist, cache works)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
 
-      - name: Inspect APK (sanity)
+      - name: Install Gradle
         shell: bash
         run: |
           set -e
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          GRADLE_VERSION="8.2"
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q gradle.zip
+          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Build Debug APK (installable)
+        run: gradle :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
