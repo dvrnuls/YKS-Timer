@@ -431,6 +431,7 @@ jobs:
           import android.os.Handler;
           import android.os.IBinder;
           import android.view.Display;
+          import android.view.Gravity;
           import android.view.LayoutInflater;
           import android.view.MotionEvent;
           import android.view.View;
@@ -505,13 +506,12 @@ jobs:
                               WindowManager.LayoutParams.WRAP_CONTENT,
                               type,
                               WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                      | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                                       | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                               PixelFormat.TRANSLUCENT
                       );
-                      overlayParams.format = PixelFormat.TRANSLUCENT;
-                      overlayParams.x = 0;
-                      overlayParams.y = 0;
+                      overlayParams.gravity = android.view.Gravity.TOP | android.view.Gravity.LEFT;
+                      overlayParams.x = 100;
+                      overlayParams.y = 100;
 
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
@@ -666,22 +666,21 @@ jobs:
                   int screenW = wh[0];
                   int screenH = wh[1];
 
-                  int w = overlayParams.width;
-                  int h = overlayParams.height;
+                  float scale = sizePercent / 100.0f;
+                  if (scale <= 0f) scale = 1f;
+                  
+                  int scaledW = (int) Math.ceil(baseContentW * scale);
+                  int scaledH = (int) Math.ceil(baseContentH * scale);
 
-                  if (w <= 0 || h <= 0) {
-                      overlayView.measure(
-                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                              View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-                      );
-                      w = overlayView.getMeasuredWidth();
-                      h = overlayView.getMeasuredHeight();
+                  if (scaledW <= 0 || scaledH <= 0) {
+                      scaledW = overlayParams.width;
+                      scaledH = overlayParams.height;
                   }
 
                   int minX = 0;
                   int minY = 0;
-                  int maxX = screenW - w;
-                  int maxY = screenH - h;
+                  int maxX = Math.max(0, screenW - scaledW);
+                  int maxY = Math.max(0, screenH - scaledH);
 
                   overlayParams.x = clamp(x, minX, maxX);
                   overlayParams.y = clamp(y, minY, maxY);
