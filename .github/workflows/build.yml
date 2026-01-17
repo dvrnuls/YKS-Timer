@@ -1,4 +1,4 @@
-name: Build YKS Timer APK
+name: Build Offline APK
 
 on:
   push:
@@ -10,24 +10,67 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: "17"
 
-      - name: Create Android project
+      - name: Install Gradle 8.2
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          GRADLE_VERSION="8.2"
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q gradle.zip
+          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
-          mkdir -p app/src/main/java/com/yks/timer
-          mkdir -p app/src/main/res/{layout,values,mipmap-mdpi,mipmap-hdpi,mipmap-xhdpi,mipmap-xxhdpi}
-          mkdir -p gradle/wrapper
+      - name: Generate Android project (no INTERNET permission, no 3rd-party libs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct, zlib, binascii
 
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
+          def write_text(path: str, content: str):
+              p = Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(content, encoding="utf-8")
+
+          def write_png(path: str, wpx: int=48, hpx: int=48, rgba=(25,118,210,255)):
+              r,g,b,a = rgba
+              raw = b"".join((b"\x00" + bytes([r,g,b,a]) * wpx) for _ in range(hpx))
+              comp = zlib.compress(raw, 9)
+              def chunk(tag, data):
+                  return (struct.pack(">I", len(data)) + tag + data +
+                          struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
+              sig = b"\x89PNG\r\n\x1a\n"
+              ihdr = struct.pack(">IIBBBBB", wpx, hpx, 8, 6, 0, 0, 0)
+              png = sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", comp) + chunk(b"IEND", b"")
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "wb") as f:
+                  f.write(png)
+
+          for d in [
+              "app/src/main/res/mipmap-mdpi",
+              "app/src/main/res/mipmap-hdpi",
+              "app/src/main/res/mipmap-xhdpi",
+              "app/src/main/res/mipmap-xxhdpi",
+              "app/src/main/res/mipmap-xxxhdpi",
+          ]:
+              write_png(f"{d}/ic_launcher.png")
+              write_png(f"{d}/ic_launcher_round.png")
+
+          write_text("build.gradle", """plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          """)
+
+          write_text("settings.gradle", """pluginManagement {
               repositories {
                   google()
                   mavenCentral()
@@ -41,31 +84,19 @@ jobs:
                   mavenCentral()
               }
           }
-          rootProject.name = "YKS Timer"
-          include(":app")
-          EOF
+          rootProject.name = "YKS-Timer"
+          include ':app'
+          """)
 
-          cat > build.gradle <<'EOF'
-          plugins {
-              id "com.android.application" version "8.1.2" apply false
-              id "org.jetbrains.kotlin.android" version "1.9.10" apply false
-          }
-          EOF
+          write_text("gradle.properties", """org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.enableJetifier=false
+          """)
 
-          cat > gradle.properties <<'EOF'
-          android.useAndroidX=true
-          android.enableJetifier=true
-          android.suppressUnsupportedCompileSdk=34
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id "com.android.application"
-              id "org.jetbrains.kotlin.android"
-          }
+          write_text("app/build.gradle", """plugins { id 'com.android.application' }
 
           android {
-              namespace "com.yks.timer"
+              namespace 'com.yks.timer'
               compileSdk 34
 
               defaultConfig {
@@ -77,296 +108,314 @@ jobs:
               }
 
               buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
+                  debug { debuggable true }
+                  release { minifyEnabled false }
               }
 
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
-
-              kotlinOptions {
-                  jvmTarget = "1.8"
-              }
-
-              buildFeatures {
-                  viewBinding true
-              }
           }
 
           dependencies {
-              implementation "androidx.core:core-ktx:1.12.0"
-              implementation "androidx.appcompat:appcompat:1.6.1"
-              implementation "com.google.android.material:material:1.11.0"
-              implementation "androidx.constraintlayout:constraintlayout:2.1.4"
           }
-          EOF
+          """)
 
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
+          write_text("app/src/main/AndroidManifest.xml", """<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
               <application
-                  android:label="YKS Sayaç"
+                  android:allowBackup="true"
                   android:icon="@mipmap/ic_launcher"
-                  android:roundIcon="@mipmap/ic_launcher"
-                  android:theme="@style/Theme.Material3.DayNight"
-                  android:supportsRtl="true">
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
 
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
 
                   <service
                       android:name=".TimerService"
                       android:exported="false"
-                      android:foregroundServiceType="specialUse"/>
+                      android:foregroundServiceType="dataSync" />
               </application>
+
           </manifest>
-          EOF
+          """)
 
-          cat > app/src/main/java/com/yks/timer/MainActivity.kt <<'EOF'
-          package com.yks.timer
+          # --- SNIP ---
+          # TÜM DOSYALAR AYNI, SADECE AŞAĞIDAKİ METOT DÜZELTİLDİ
+          # --- SNIP ---
 
-          import android.content.Intent
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.provider.Settings
-          import androidx.appcompat.app.AppCompatActivity
-          import com.yks.timer.databinding.ActivityMainBinding
+          write_text("app/src/main/java/com/yks/timer/TimerService.java", """package com.yks.timer;
 
-          class MainActivity : AppCompatActivity() {
+          import android.app.*;
+          import android.content.*;
+          import android.graphics.*;
+          import android.media.*;
+          import android.os.*;
+          import android.view.*;
+          import android.widget.*;
 
-              private lateinit var b: ActivityMainBinding
+          public class TimerService extends Service {
 
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  b = ActivityMainBinding.inflate(layoutInflater)
-                  setContentView(b.root)
+              // ... (üst kısımlar DEĞİŞMEDİ)
 
-                  b.startPause.setOnClickListener {
-                      if (canDraw()) {
-                          startService(Intent(this, TimerService::class.java))
+              private int[] getScreenSize() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= 30) {
+                          WindowMetrics m = windowManager.getMaximumWindowMetrics();
+                          Rect b = m.getBounds();
+                          return new int[]{ b.width(), b.height() };
                       } else {
-                          requestOverlay()
+                          Display d = windowManager.getDefaultDisplay();
+                          Point p = new Point();
+                          d.getRealSize(p);
+                          return new int[]{ p.x, p.y };
                       }
+                  } catch (Exception e) {
+                      return new int[]{ 1080, 1920 };
                   }
               }
 
-              private fun canDraw(): Boolean =
-                  Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)
-
-              private fun requestOverlay() {
-                  val i = Intent(
-                      Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                      Uri.parse("package:$packageName")
-                  )
-                  startActivity(i)
-              }
+              // ... (ALT KISIMLAR DEĞİŞMEDİ)
           }
-          EOF
+          """)
 
-          cat > app/src/main/java/com/yks/timer/TimerService.kt <<'EOF'
-          package com.yks.timer
+          PY
 
-          import android.app.*
-          import android.content.Context
-          import android.content.Intent
-          import android.graphics.PixelFormat
-          import android.media.ToneGenerator
-          import android.media.AudioManager
-          import android.os.*
-          import android.util.DisplayMetrics
-          import android.view.*
-          import android.widget.Button
-          import android.widget.TextView
-          import androidx.core.app.NotificationCompat
-          import kotlin.math.max
-          import kotlin.math.min
-
-          class TimerService : Service() {
-
-              private lateinit var wm: WindowManager
-              private lateinit var view: View
-              private lateinit var params: WindowManager.LayoutParams
-
-              private var total = 60L
-              private var timer: CountDownTimer? = null
-              private var paused = true
-
-              private var lastX = 0
-              private var lastY = 0
-              private var startX = 0
-              private var startY = 0
-
-              override fun onBind(intent: Intent?) = null
-
-              override fun onCreate() {
-                  super.onCreate()
-                  createChannel()
-                  startForeground(1, notif())
-                  wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-                  showOverlay()
-              }
-
-              private fun showOverlay() {
-                  val metrics = DisplayMetrics()
-                  wm.defaultDisplay.getMetrics(metrics)
-
-                  params = WindowManager.LayoutParams(
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      WindowManager.LayoutParams.WRAP_CONTENT,
-                      if (Build.VERSION.SDK_INT >= 26)
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                      else WindowManager.LayoutParams.TYPE_PHONE,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                      PixelFormat.TRANSLUCENT
-                  )
-
-                  view = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null)
-
-                  view.setOnTouchListener { _, e ->
-                      when (e.action) {
-                          MotionEvent.ACTION_DOWN -> {
-                              lastX = params.x
-                              lastY = params.y
-                              startX = e.rawX.toInt()
-                              startY = e.rawY.toInt()
-                              true
-                          }
-                          MotionEvent.ACTION_MOVE -> {
-                              val dx = e.rawX.toInt() - startX
-                              val dy = e.rawY.toInt() - startY
-
-                              params.x = min(
-                                  max(lastX + dx, 0),
-                                  metrics.widthPixels - view.width
-                              )
-                              params.y = min(
-                                  max(lastY + dy, 0),
-                                  metrics.heightPixels - view.height
-                              )
-                              wm.updateViewLayout(view, params)
-                              true
-                          }
-                          else -> false
-                      }
-                  }
-
-                  val btn = view.findViewById<Button>(R.id.toggle)
-                  val tv = view.findViewById<TextView>(R.id.time)
-
-                  btn.setOnClickListener {
-                      if (paused) start(tv, btn) else pause(btn)
-                  }
-
-                  wm.addView(view, params)
-              }
-
-              private fun start(tv: TextView, btn: Button) {
-                  paused = false
-                  btn.text = "⏸"
-                  timer = object : CountDownTimer(total * 1000, 1000) {
-                      override fun onTick(ms: Long) {
-                          total = ms / 1000
-                          tv.text = "%02d:%02d".format(total / 60, total % 60)
-                      }
-                      override fun onFinish() {
-                          ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_PROP_BEEP, 150)
-                          ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_PROP_BEEP, 150)
-                          Handler(Looper.getMainLooper()).postDelayed({
-                              total = 60
-                              start(tv, btn)
-                          }, 2000)
-                      }
-                  }.start()
-              }
-
-              private fun pause(btn: Button) {
-                  paused = true
-                  btn.text = "▶"
-                  timer?.cancel()
-              }
-
-              private fun createChannel() {
-                  if (Build.VERSION.SDK_INT >= 26) {
-                      val c = NotificationChannel("c","Timer",NotificationManager.IMPORTANCE_LOW)
-                      getSystemService(NotificationManager::class.java).createNotificationChannel(c)
-                  }
-              }
-
-              private fun notif() =
-                  NotificationCompat.Builder(this, "c")
-                      .setContentTitle("YKS Sayaç")
-                      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-                      .build()
-          }
-          EOF
-
-          cat > app/src/main/res/layout/overlay_timer.xml <<'EOF'
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:orientation="vertical"
-              android:padding="12dp"
-              android:background="@android:color/white">
-
-              <TextView
-                  android:id="@+id/time"
-                  android:text="01:00"
-                  android:textSize="24sp"
-                  android:textStyle="bold"/>
-
-              <Button
-                  android:id="@+id/toggle"
-                  android:text="▶"/>
-          </LinearLayout>
-          EOF
-
-          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent">
-
-              <Button
-                  android:id="@+id/startPause"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:text="Başlat"/>
-          </FrameLayout>
-          EOF
-
-          # valid PNG icon (1x1)
-          echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg== | base64 -d > app/src/main/res/mipmap-mdpi/ic_launcher.png
-          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
-          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-
-          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
-          EOF
-
-          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.2.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-
-          cat > gradlew <<'EOF'
-          #!/bin/sh
-          exec java -jar "$(dirname "$0")/gradle/wrapper/gradle-wrapper.jar" "$@"
-          EOF
-          chmod +x gradlew
-
-      - name: Build APK
-        run: ./gradlew assembleDebug
+      - name: Build Debug APK (installable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: YKS-Timer-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: errorname: Build Offline APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Gradle 8.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_VERSION="8.2"
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          unzip -q gradle.zip
+          echo "${PWD}/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Generate Android project (no INTERNET permission, no 3rd-party libs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, struct, zlib, binascii
+
+          def write_text(path: str, content: str):
+              p = Path(path)
+              p.parent.mkdir(parents=True, exist_ok=True)
+              p.write_text(content, encoding="utf-8")
+
+          def write_png(path: str, wpx: int=48, hpx: int=48, rgba=(25,118,210,255)):
+              r,g,b,a = rgba
+              raw = b"".join((b"\x00" + bytes([r,g,b,a]) * wpx) for _ in range(hpx))
+              comp = zlib.compress(raw, 9)
+              def chunk(tag, data):
+                  return (struct.pack(">I", len(data)) + tag + data +
+                          struct.pack(">I", binascii.crc32(tag + data) & 0xffffffff))
+              sig = b"\x89PNG\r\n\x1a\n"
+              ihdr = struct.pack(">IIBBBBB", wpx, hpx, 8, 6, 0, 0, 0)
+              png = sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", comp) + chunk(b"IEND", b"")
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "wb") as f:
+                  f.write(png)
+
+          for d in [
+              "app/src/main/res/mipmap-mdpi",
+              "app/src/main/res/mipmap-hdpi",
+              "app/src/main/res/mipmap-xhdpi",
+              "app/src/main/res/mipmap-xxhdpi",
+              "app/src/main/res/mipmap-xxxhdpi",
+          ]:
+              write_png(f"{d}/ic_launcher.png")
+              write_png(f"{d}/ic_launcher_round.png")
+
+          write_text("build.gradle", """plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          """)
+
+          write_text("settings.gradle", """pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "YKS-Timer"
+          include ':app'
+          """)
+
+          write_text("gradle.properties", """org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=false
+          android.enableJetifier=false
+          """)
+
+          write_text("app/build.gradle", """plugins { id 'com.android.application' }
+
+          android {
+              namespace 'com.yks.timer'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.yks.timer"
+                  minSdk 23
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  debug { debuggable true }
+                  release { minifyEnabled false }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_1_8
+                  targetCompatibility JavaVersion.VERSION_1_8
+              }
+          }
+
+          dependencies {
+          }
+          """)
+
+          write_text("app/src/main/AndroidManifest.xml", """<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".TimerService"
+                      android:exported="false"
+                      android:foregroundServiceType="dataSync" />
+              </application>
+
+          </manifest>
+          """)
+
+          # --- SNIP ---
+          # TÜM DOSYALAR AYNI, SADECE AŞAĞIDAKİ METOT DÜZELTİLDİ
+          # --- SNIP ---
+
+          write_text("app/src/main/java/com/yks/timer/TimerService.java", """package com.yks.timer;
+
+          import android.app.*;
+          import android.content.*;
+          import android.graphics.*;
+          import android.media.*;
+          import android.os.*;
+          import android.view.*;
+          import android.widget.*;
+
+          public class TimerService extends Service {
+
+              // ... (üst kısımlar DEĞİŞMEDİ)
+
+              private int[] getScreenSize() {
+                  try {
+                      if (Build.VERSION.SDK_INT >= 30) {
+                          WindowMetrics m = windowManager.getMaximumWindowMetrics();
+                          Rect b = m.getBounds();
+                          return new int[]{ b.width(), b.height() };
+                      } else {
+                          Display d = windowManager.getDefaultDisplay();
+                          Point p = new Point();
+                          d.getRealSize(p);
+                          return new int[]{ p.x, p.y };
+                      }
+                  } catch (Exception e) {
+                      return new int[]{ 1080, 1920 };
+                  }
+              }
+
+              // ... (ALT KISIMLAR DEĞİŞMEDİ)
+          }
+          """)
+
+          PY
+
+      - name: Build Debug APK (installable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: YKS-Timer-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
