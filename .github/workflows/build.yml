@@ -520,6 +520,9 @@ jobs:
 
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
+                      
+                      overlayView.setClipChildren(false);
+                      overlayView.setClipToPadding(false);
 
                       if (overlayView instanceof ViewGroup) {
                           ((ViewGroup) overlayView).setClipChildren(false);
@@ -559,7 +562,7 @@ jobs:
 
                           @Override
                           public boolean onTouch(View v, MotionEvent e) {
-                              if (overlayContent == null) return true;
+                              if (overlayContent == null) return false;
                               float scale = sizePercent / 100.0f;
                               if (scale <= 0f) scale = 1f;
 
@@ -578,32 +581,74 @@ jobs:
                                           startRawX = e.getRawX();
                                           startRawY = e.getRawY();
                                           return true;
-                                      } else {
-                                          dispatchScaled(e, scale, contentX, contentY);
-                                          return true;
                                       }
+                                      return false;
                                   case MotionEvent.ACTION_MOVE:
                                       if (dragging) {
                                           int dx = (int) (e.getRawX() - startRawX);
                                           int dy = (int) (e.getRawY() - startRawY);
                                           setPosition(startX + dx, startY + dy);
                                           return true;
-                                      } else {
-                                          dispatchScaled(e, scale, contentX, contentY);
-                                          return true;
                                       }
+                                      return false;
                                   case MotionEvent.ACTION_UP:
                                   case MotionEvent.ACTION_CANCEL:
                                       if (dragging) {
                                           dragging = false;
                                           return true;
-                                      } else {
-                                          dispatchScaled(e, scale, contentX, contentY);
+                                      }
+                                      return false;
+                                  default:
+                                      return false;
+                              }
+                          }
+                      });
+
+                      overlayContent.setOnClickListener(null);
+                          private boolean dragging = false;
+                          private float startRawX, startRawY;
+                          private int startX, startY;
+
+                          @Override
+                          public boolean onTouch(View v, MotionEvent e) {
+                              if (overlayContent == null) return false;
+                              float scale = sizePercent / 100.0f;
+                              if (scale <= 0f) scale = 1f;
+
+                              float contentX = overlayContent.getTranslationX();
+                              float contentY = overlayContent.getTranslationY();
+                              float localX = e.getX() - contentX;
+                              float localY = e.getY() - contentY;
+                              int handlePx = (baseHandleH > 0) ? (int) Math.ceil(baseHandleH * scale) : 120;
+
+                              switch (e.getAction()) {
+                                  case MotionEvent.ACTION_DOWN:
+                                      dragging = (localX >= 0 && localX <= (baseContentW * scale) && localY >= 0f && localY <= handlePx);
+                                      if (dragging) {
+                                          startX = (int) contentX;
+                                          startY = (int) contentY;
+                                          startRawX = e.getRawX();
+                                          startRawY = e.getRawY();
                                           return true;
                                       }
+                                      return false;
+                                  case MotionEvent.ACTION_MOVE:
+                                      if (dragging) {
+                                          int dx = (int) (e.getRawX() - startRawX);
+                                          int dy = (int) (e.getRawY() - startRawY);
+                                          setPosition(startX + dx, startY + dy);
+                                          return true;
+                                      }
+                                      return false;
+                                  case MotionEvent.ACTION_UP:
+                                  case MotionEvent.ACTION_CANCEL:
+                                      if (dragging) {
+                                          dragging = false;
+                                          return true;
+                                      }
+                                      return false;
                                   default:
-                                      dispatchScaled(e, scale, contentX, contentY);
-                                      return true;
+                                      return false;
                               }
                           }
                       });
@@ -620,14 +665,7 @@ jobs:
               }
 
               private void dispatchScaled(MotionEvent e, float scale, float contentX, float contentY) {
-                  try {
-                      MotionEvent ev = MotionEvent.obtain(e);
-                      float lx = (e.getX() - contentX) / scale;
-                      float ly = (e.getY() - contentY) / scale;
-                      ev.setLocation(lx, ly);
-                      overlayContent.dispatchTouchEvent(ev);
-                      ev.recycle();
-                  } catch (Exception ignored) {}
+                  // Not needed anymore
               }
 
               private void applyScale() {
