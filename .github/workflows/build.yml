@@ -63,7 +63,7 @@ jobs:
                           row.append((0, 0, 0, 0))
                   pixels.append(row)
               
-              raw = b"".join(b"\x00" + bytes([r,g,b,a for r,g,b,a in row]) for row in pixels)
+              raw = b"".join(b"\x00" + bytes([c for rgba in row for c in rgba]) for row in pixels)
               comp = zlib.compress(raw, 9)
               def chunk(tag, data):
                   return (struct.pack(">I", len(data)) + tag + data +
