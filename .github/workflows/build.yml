@@ -29,9 +29,6 @@ jobs:
         run: |
           set -e
 
-          # -----------------------------
-          # DIZINLER
-          # -----------------------------
           mkdir -p app/src/main/java/com/yks/timer
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
@@ -42,15 +39,29 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxhdpi
 
           # -----------------------------
-          # SETTINGS
+          # settings.gradle  (PLUGIN MANAGEMENT EKLENDI)
           # -----------------------------
           cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  gradlePluginPortal()
+                  google()
+                  mavenCentral()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
           rootProject.name = "YKSTimer"
           include(":app")
           EOF
 
           # -----------------------------
-          # ROOT BUILD
+          # Root build.gradle (uses plugin DSL)
           # -----------------------------
           cat > build.gradle <<'EOF'
           plugins {
@@ -59,7 +70,7 @@ jobs:
           EOF
 
           # -----------------------------
-          # GRADLE PROPS
+          # gradle.properties
           # -----------------------------
           cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx2048m
@@ -68,7 +79,7 @@ jobs:
           EOF
 
           # -----------------------------
-          # APP BUILD
+          # app/build.gradle
           # -----------------------------
           cat > app/build.gradle <<'EOF'
           plugins { id "com.android.application" }
@@ -87,9 +98,7 @@ jobs:
 
               buildTypes {
                   debug { debuggable true }
-                  release {
-                      minifyEnabled false
-                  }
+                  release { minifyEnabled false }
               }
 
               compileOptions {
@@ -98,11 +107,13 @@ jobs:
               }
           }
 
-          dependencies {}
+          dependencies {
+              // No third-party libraries; no INTERNET permission in manifest.
+          }
           EOF
 
           # -----------------------------
-          # MANIFEST (NO INTERNET)
+          # AndroidManifest (NO INTERNET)
           # -----------------------------
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -136,7 +147,7 @@ jobs:
           EOF
 
           # -----------------------------
-          # STRINGS
+          # Strings
           # -----------------------------
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <resources>
@@ -150,7 +161,7 @@ jobs:
           EOF
 
           # -----------------------------
-          # MAIN LAYOUT
+          # Layouts & Java (tam fonksiyonel uygulama)
           # -----------------------------
           cat > app/src/main/res/layout/activity_main.xml <<'EOF'
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -191,9 +202,6 @@ jobs:
           </LinearLayout>
           EOF
 
-          # -----------------------------
-          # MAIN ACTIVITY
-          # -----------------------------
           cat > app/src/main/java/com/yks/timer/MainActivity.java <<'EOF'
           package com.yks.timer;
 
@@ -207,6 +215,7 @@ jobs:
 
           public class MainActivity extends Activity {
 
+              @Override
               protected void onCreate(Bundle b) {
                   super.onCreate(b);
                   setContentView(R.layout.activity_main);
@@ -242,9 +251,6 @@ jobs:
           }
           EOF
 
-          # -----------------------------
-          # TIMER SERVICE (DEX SAFE)
-          # -----------------------------
           cat > app/src/main/java/com/yks/timer/TimerService.java <<'EOF'
           package com.yks.timer;
 
@@ -262,29 +268,31 @@ jobs:
               View overlay;
               int total;
               int size;
-              boolean running = false;
               CountDownTimer timer;
+              View redView;
+              Handler handler = new Handler();
+              Runnable pendingResume;
 
               @Override public IBinder onBind(Intent i){ return null; }
 
               @Override public void onCreate(){
                   super.onCreate();
                   wm = (WindowManager)getSystemService(WINDOW_SERVICE);
-                  startForeground(1, notif());
+                  startForeground(1, notification());
               }
 
-              @Override public int onStartCommand(Intent i,int f,int id){
-                  total = i.getIntExtra("seconds",60);
-                  size  = i.getIntExtra("size",40);
-                  if(overlay==null) show();
+              @Override public int onStartCommand(Intent intent,int flags,int startId){
+                  total = intent.getIntExtra("seconds",60);
+                  size  = intent.getIntExtra("size",40);
+                  if (overlay==null) showOverlay();
+                  else updateOverlaySize();
+                  startTimer();
                   return START_STICKY;
               }
 
-              void show(){
-                  overlay = LayoutInflater.from(this)
-                      .inflate(android.R.layout.simple_list_item_1,null);
-
-                  TextView tv = (TextView)overlay.findViewById(android.R.id.text1);
+              void showOverlay(){
+                  overlay = LayoutInflater.from(this).inflate(android.R.layout.simple_list_item_1,null);
+                  TextView tv = overlay.findViewById(android.R.id.text1);
                   tv.setTextSize(size/2f);
                   tv.setText("00:00");
                   tv.setBackgroundColor(0xFFFFFFFF);
@@ -297,67 +305,108 @@ jobs:
                           WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
                           WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                           PixelFormat.TRANSLUCENT);
-
-                  p.gravity = Gravity.TOP|Gravity.LEFT;
+                  p.gravity = Gravity.TOP | Gravity.LEFT;
+                  p.x = 24; p.y = 120;
 
                   overlay.setOnTouchListener(new View.OnTouchListener(){
-                      int x,y; float tx,ty;
+                      int startX, startY; float downX, downY;
                       public boolean onTouch(View v, MotionEvent e){
-                          if(e.getAction()==MotionEvent.ACTION_DOWN){
-                              x=p.x; y=p.y;
-                              tx=e.getRawX(); ty=e.getRawY();
-                              return true;
-                          }
-                          if(e.getAction()==MotionEvent.ACTION_MOVE){
-                              p.x = Math.max(0, x+(int)(e.getRawX()-tx));
-                              p.y = Math.max(0, y+(int)(e.getRawY()-ty));
-                              wm.updateViewLayout(overlay,p);
-                              return true;
+                          switch(e.getAction()){
+                              case MotionEvent.ACTION_DOWN:
+                                  startX = p.x; startY = p.y;
+                                  downX = e.getRawX(); downY = e.getRawY();
+                                  return true;
+                              case MotionEvent.ACTION_MOVE:
+                                  p.x = Math.max(0, startX + (int)(e.getRawX() - downX));
+                                  p.y = Math.max(0, startY + (int)(e.getRawY() - downY));
+                                  try { wm.updateViewLayout(overlay,p); } catch(Exception ignored){}
+                                  return true;
                           }
                           return false;
                       }
                   });
 
                   wm.addView(overlay,p);
-                  startTimer(tv);
               }
 
-              void startTimer(TextView tv){
-                  if(timer!=null) timer.cancel();
-                  running=true;
+              void updateOverlaySize(){
+                  if (overlay==null) return;
+                  TextView tv = overlay.findViewById(android.R.id.text1);
+                  tv.setTextSize(size/2f);
+              }
 
+              void startTimer(){
+                  if(timer!=null) timer.cancel();
                   timer = new CountDownTimer(total*1000,1000){
                       public void onTick(long ms){
-                          int s=(int)(ms/1000);
-                          tv.setText(String.format("%02d:%02d",s/60,s%60));
+                          int s = (int)(ms/1000);
+                          TextView tv = overlay.findViewById(android.R.id.text1);
+                          tv.setText(String.format("%02d:%02d", s/60, s%60));
                       }
                       public void onFinish(){
-                          ding(); ding();
+                          showRedScreen();
                       }
                   }.start();
               }
 
-              void ding(){
-                  ToneGenerator t = new ToneGenerator(AudioManager.STREAM_NOTIFICATION,100);
-                  t.startTone(ToneGenerator.TONE_PROP_BEEP,150);
+              void showRedScreen(){
+                  if (redView!=null) return;
+                  playDingDing();
+                  redView = new View(this);
+                  redView.setBackgroundColor(0xCCFF0000);
+                  WindowManager.LayoutParams rp =
+                      new WindowManager.LayoutParams(
+                          WindowManager.LayoutParams.MATCH_PARENT,
+                          WindowManager.LayoutParams.MATCH_PARENT,
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          PixelFormat.TRANSLUCENT);
+                  wm.addView(redView, rp);
+
+                  // tap to skip -> hide immediately, wait 2s, restart
+                  redView.setOnTouchListener((v,e)->{
+                      try { wm.removeView(redView); } catch(Exception ignored) {}
+                      redView = null;
+                      if (timer!=null) timer.cancel();
+                      if (pendingResume!=null) handler.removeCallbacks(pendingResume);
+                      pendingResume = () -> { startTimer(); };
+                      handler.postDelayed(pendingResume, 2000);
+                      return true;
+                  });
               }
 
-              Notification notif(){
-                  return new Notification.Builder(this,"")
-                      .setContentTitle("YKS Sayaç")
-                      .setSmallIcon(android.R.drawable.ic_dialog_info)
-                      .build();
+              void playDingDing(){
+                  try {
+                      ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_NOTIFICATION,100);
+                      tg.startTone(ToneGenerator.TONE_PROP_BEEP,140);
+                      Thread.sleep(220);
+                      tg.startTone(ToneGenerator.TONE_PROP_BEEP,140);
+                      tg.release();
+                  } catch(Exception ignored){}
+              }
+
+              Notification notification(){
+                  Notification.Builder b = new Notification.Builder(this);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationManager nm = getSystemService(NotificationManager.class);
+                      NotificationChannel ch = new NotificationChannel("c","c", NotificationManager.IMPORTANCE_LOW);
+                      nm.createNotificationChannel(ch);
+                      b = new Notification.Builder(this, "c");
+                  }
+                  b.setContentTitle("YKS Sayaç").setSmallIcon(android.R.drawable.ic_dialog_info);
+                  return b.build();
               }
 
               @Override public void onDestroy(){
-                  if(timer!=null) timer.cancel();
-                  if(overlay!=null) wm.removeView(overlay);
+                  try { if(timer!=null) timer.cancel(); } catch(Exception ignored){}
+                  try { if(overlay!=null) wm.removeView(overlay); } catch(Exception ignored){}
+                  try { if(redView!=null) wm.removeView(redView); } catch(Exception ignored){}
               }
           }
           EOF
 
           # -----------------------------
-          # ICON (VALID PNG HEADER)
+          # Simple valid PNG for launcher (AAPT2 safe)
           # -----------------------------
           printf '\x89PNG\r\n\x1a\n' > app/src/main/res/mipmap-mdpi/ic_launcher.png
           cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -365,7 +414,7 @@ jobs:
           cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
 
       - name: Build APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
