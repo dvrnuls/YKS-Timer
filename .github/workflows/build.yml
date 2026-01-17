@@ -645,11 +645,8 @@ jobs:
                   overlayContent.setPivotX(0f);
                   overlayContent.setPivotY(0f);
 
-                  int scaledW = (int) Math.ceil(baseContentW * scale);
-                  int scaledH = (int) Math.ceil(baseContentH * scale);
-
-                  overlayParams.width = scaledW;
-                  overlayParams.height = scaledH;
+                  overlayParams.width = baseContentW;
+                  overlayParams.height = baseContentH;
 
                   try { wm.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
@@ -669,18 +666,18 @@ jobs:
                   float scale = sizePercent / 100.0f;
                   if (scale <= 0f) scale = 1f;
                   
-                  int scaledW = (int) Math.ceil(baseContentW * scale);
-                  int scaledH = (int) Math.ceil(baseContentH * scale);
+                  int actualW = (int) Math.ceil(baseContentW * scale);
+                  int actualH = (int) Math.ceil(baseContentH * scale);
 
-                  if (scaledW <= 0 || scaledH <= 0) {
-                      scaledW = overlayParams.width;
-                      scaledH = overlayParams.height;
+                  if (actualW <= 0 || actualH <= 0) {
+                      actualW = baseContentW;
+                      actualH = baseContentH;
                   }
 
                   int minX = 0;
                   int minY = 0;
-                  int maxX = Math.max(0, screenW - scaledW);
-                  int maxY = Math.max(0, screenH - scaledH);
+                  int maxX = Math.max(0, screenW - actualW);
+                  int maxY = Math.max(0, screenH - actualH);
 
                   overlayParams.x = clamp(x, minX, maxX);
                   overlayParams.y = clamp(y, minY, maxY);
