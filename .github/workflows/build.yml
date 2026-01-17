@@ -509,8 +509,9 @@ jobs:
                                       | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                               PixelFormat.TRANSLUCENT
                       );
-                      overlayParams.x = -10000;
-                      overlayParams.y = -10000;
+                      overlayParams.format = PixelFormat.TRANSLUCENT;
+                      overlayParams.x = 0;
+                      overlayParams.y = 0;
 
                       overlayView = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null);
                       overlayContent = overlayView.findViewById(R.id.overlayContent);
@@ -544,7 +545,7 @@ jobs:
                           baseHandleH = dragHandle.getHeight();
                           applyScale();
                           int[] wh = getScreenSize();
-                          setPosition(wh[0] / 4, wh[1] / 4);
+                          setPosition(wh[0] / 3, wh[1] / 3);
                       });
 
                       overlayView.setOnTouchListener(new View.OnTouchListener() {
@@ -644,8 +645,11 @@ jobs:
                   overlayContent.setPivotX(0f);
                   overlayContent.setPivotY(0f);
 
-                  overlayParams.width = baseContentW;
-                  overlayParams.height = baseContentH;
+                  int scaledW = (int) Math.ceil(baseContentW * scale);
+                  int scaledH = (int) Math.ceil(baseContentH * scale);
+
+                  overlayParams.width = scaledW;
+                  overlayParams.height = scaledH;
 
                   try { wm.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
@@ -662,8 +666,8 @@ jobs:
                   int screenW = wh[0];
                   int screenH = wh[1];
 
-                  int w = baseContentW;
-                  int h = baseContentH;
+                  int w = overlayParams.width;
+                  int h = overlayParams.height;
 
                   if (w <= 0 || h <= 0) {
                       overlayView.measure(
@@ -674,11 +678,13 @@ jobs:
                       h = overlayView.getMeasuredHeight();
                   }
 
+                  int minX = 0;
+                  int minY = 0;
                   int maxX = screenW - w;
                   int maxY = screenH - h;
 
-                  overlayParams.x = clamp(x, 0, maxX);
-                  overlayParams.y = clamp(y, 0, maxY);
+                  overlayParams.x = clamp(x, minX, maxX);
+                  overlayParams.y = clamp(y, minY, maxY);
 
                   try { wm.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
