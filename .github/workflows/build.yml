@@ -10,43 +10,28 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
-      - name: Install Gradle 8.2
-        run: |
-          curl -L https://services.gradle.org/distributions/gradle-8.2-bin.zip -o gradle.zip
-          unzip -q gradle.zip
-          echo "$PWD/gradle-8.2/bin" >> $GITHUB_PATH
-
-      - name: Generate Android Project (FULL)
+      - name: Create Android project
         run: |
           set -e
 
           mkdir -p app/src/main/java/com/yks/timer
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/raw
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
+          mkdir -p app/src/main/res/{layout,values,mipmap-mdpi,mipmap-hdpi,mipmap-xhdpi,mipmap-xxhdpi}
+          mkdir -p gradle/wrapper
 
-          # -----------------------------
-          # settings.gradle  (PLUGIN MANAGEMENT EKLENDI)
-          # -----------------------------
           cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
-                  gradlePluginPortal()
                   google()
                   mavenCentral()
+                  gradlePluginPortal()
               }
           }
           dependencyResolutionManagement {
@@ -56,33 +41,28 @@ jobs:
                   mavenCentral()
               }
           }
-          rootProject.name = "YKSTimer"
+          rootProject.name = "YKS Timer"
           include(":app")
           EOF
 
-          # -----------------------------
-          # Root build.gradle (uses plugin DSL)
-          # -----------------------------
           cat > build.gradle <<'EOF'
           plugins {
-              id "com.android.application" version "8.2.2" apply false
+              id "com.android.application" version "8.1.2" apply false
+              id "org.jetbrains.kotlin.android" version "1.9.10" apply false
           }
           EOF
 
-          # -----------------------------
-          # gradle.properties
-          # -----------------------------
           cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2048m
           android.useAndroidX=true
-          android.enableJetifier=false
+          android.enableJetifier=true
+          android.suppressUnsupportedCompileSdk=34
           EOF
 
-          # -----------------------------
-          # app/build.gradle
-          # -----------------------------
           cat > app/build.gradle <<'EOF'
-          plugins { id "com.android.application" }
+          plugins {
+              id "com.android.application"
+              id "org.jetbrains.kotlin.android"
+          }
 
           android {
               namespace "com.yks.timer"
@@ -97,36 +77,45 @@ jobs:
               }
 
               buildTypes {
-                  debug { debuggable true }
-                  release { minifyEnabled false }
+                  release {
+                      minifyEnabled false
+                  }
               }
 
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_1_8
                   targetCompatibility JavaVersion.VERSION_1_8
               }
+
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+
+              buildFeatures {
+                  viewBinding true
+              }
           }
 
           dependencies {
-              // No third-party libraries; no INTERNET permission in manifest.
+              implementation "androidx.core:core-ktx:1.12.0"
+              implementation "androidx.appcompat:appcompat:1.6.1"
+              implementation "com.google.android.material:material:1.11.0"
+              implementation "androidx.constraintlayout:constraintlayout:2.1.4"
           }
           EOF
 
-          # -----------------------------
-          # AndroidManifest (NO INTERNET)
-          # -----------------------------
           cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
               <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
               <application
                   android:label="YKS Sayaç"
                   android:icon="@mipmap/ic_launcher"
                   android:roundIcon="@mipmap/ic_launcher"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  android:theme="@style/Theme.Material3.DayNight"
+                  android:supportsRtl="true">
 
                   <activity
                       android:name=".MainActivity"
@@ -140,284 +129,244 @@ jobs:
                   <service
                       android:name=".TimerService"
                       android:exported="false"
-                      android:foregroundServiceType="dataSync"/>
+                      android:foregroundServiceType="specialUse"/>
               </application>
-
           </manifest>
           EOF
 
-          # -----------------------------
-          # Strings
-          # -----------------------------
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <resources>
-              <string name="app_name">YKS Sayaç</string>
-              <string name="start_pause">Başlat / Duraklat</string>
-              <string name="reset">Sıfırla</string>
-              <string name="next">Soruyu Geç</string>
-              <string name="close">Kapat</string>
-              <string name="time_up">SÜRE DOLDU</string>
-          </resources>
+          cat > app/src/main/java/com/yks/timer/MainActivity.kt <<'EOF'
+          package com.yks.timer
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import androidx.appcompat.app.AppCompatActivity
+          import com.yks.timer.databinding.ActivityMainBinding
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var b: ActivityMainBinding
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  b = ActivityMainBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+
+                  b.startPause.setOnClickListener {
+                      if (canDraw()) {
+                          startService(Intent(this, TimerService::class.java))
+                      } else {
+                          requestOverlay()
+                      }
+                  }
+              }
+
+              private fun canDraw(): Boolean =
+                  Build.VERSION.SDK_INT < 23 || Settings.canDrawOverlays(this)
+
+              private fun requestOverlay() {
+                  val i = Intent(
+                      Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                      Uri.parse("package:$packageName")
+                  )
+                  startActivity(i)
+              }
+          }
           EOF
 
-          # -----------------------------
-          # Layouts & Java (tam fonksiyonel uygulama)
-          # -----------------------------
-          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          cat > app/src/main/java/com/yks/timer/TimerService.kt <<'EOF'
+          package com.yks.timer
+
+          import android.app.*
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.PixelFormat
+          import android.media.ToneGenerator
+          import android.media.AudioManager
+          import android.os.*
+          import android.util.DisplayMetrics
+          import android.view.*
+          import android.widget.Button
+          import android.widget.TextView
+          import androidx.core.app.NotificationCompat
+          import kotlin.math.max
+          import kotlin.math.min
+
+          class TimerService : Service() {
+
+              private lateinit var wm: WindowManager
+              private lateinit var view: View
+              private lateinit var params: WindowManager.LayoutParams
+
+              private var total = 60L
+              private var timer: CountDownTimer? = null
+              private var paused = true
+
+              private var lastX = 0
+              private var lastY = 0
+              private var startX = 0
+              private var startY = 0
+
+              override fun onBind(intent: Intent?) = null
+
+              override fun onCreate() {
+                  super.onCreate()
+                  createChannel()
+                  startForeground(1, notif())
+                  wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                  showOverlay()
+              }
+
+              private fun showOverlay() {
+                  val metrics = DisplayMetrics()
+                  wm.defaultDisplay.getMetrics(metrics)
+
+                  params = WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      WindowManager.LayoutParams.WRAP_CONTENT,
+                      if (Build.VERSION.SDK_INT >= 26)
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      else WindowManager.LayoutParams.TYPE_PHONE,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  )
+
+                  view = LayoutInflater.from(this).inflate(R.layout.overlay_timer, null)
+
+                  view.setOnTouchListener { _, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              lastX = params.x
+                              lastY = params.y
+                              startX = e.rawX.toInt()
+                              startY = e.rawY.toInt()
+                              true
+                          }
+                          MotionEvent.ACTION_MOVE -> {
+                              val dx = e.rawX.toInt() - startX
+                              val dy = e.rawY.toInt() - startY
+
+                              params.x = min(
+                                  max(lastX + dx, 0),
+                                  metrics.widthPixels - view.width
+                              )
+                              params.y = min(
+                                  max(lastY + dy, 0),
+                                  metrics.heightPixels - view.height
+                              )
+                              wm.updateViewLayout(view, params)
+                              true
+                          }
+                          else -> false
+                      }
+                  }
+
+                  val btn = view.findViewById<Button>(R.id.toggle)
+                  val tv = view.findViewById<TextView>(R.id.time)
+
+                  btn.setOnClickListener {
+                      if (paused) start(tv, btn) else pause(btn)
+                  }
+
+                  wm.addView(view, params)
+              }
+
+              private fun start(tv: TextView, btn: Button) {
+                  paused = false
+                  btn.text = "⏸"
+                  timer = object : CountDownTimer(total * 1000, 1000) {
+                      override fun onTick(ms: Long) {
+                          total = ms / 1000
+                          tv.text = "%02d:%02d".format(total / 60, total % 60)
+                      }
+                      override fun onFinish() {
+                          ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                          ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                          Handler(Looper.getMainLooper()).postDelayed({
+                              total = 60
+                              start(tv, btn)
+                          }, 2000)
+                      }
+                  }.start()
+              }
+
+              private fun pause(btn: Button) {
+                  paused = true
+                  btn.text = "▶"
+                  timer?.cancel()
+              }
+
+              private fun createChannel() {
+                  if (Build.VERSION.SDK_INT >= 26) {
+                      val c = NotificationChannel("c","Timer",NotificationManager.IMPORTANCE_LOW)
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(c)
+                  }
+              }
+
+              private fun notif() =
+                  NotificationCompat.Builder(this, "c")
+                      .setContentTitle("YKS Sayaç")
+                      .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+                      .build()
+          }
+          EOF
+
+          cat > app/src/main/res/layout/overlay_timer.xml <<'EOF'
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent"
               android:orientation="vertical"
-              android:padding="24dp">
+              android:padding="12dp"
+              android:background="@android:color/white">
 
-              <EditText
-                  android:id="@+id/min"
-                  android:hint="Dakika"
-                  android:inputType="number"
-                  android:text="1"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"/>
-
-              <EditText
-                  android:id="@+id/sec"
-                  android:hint="Saniye"
-                  android:inputType="number"
-                  android:text="0"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"/>
-
-              <SeekBar
-                  android:id="@+id/sizeSeek"
-                  android:max="99"
-                  android:progress="39"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"/>
+              <TextView
+                  android:id="@+id/time"
+                  android:text="01:00"
+                  android:textSize="24sp"
+                  android:textStyle="bold"/>
 
               <Button
-                  android:id="@+id/start"
-                  android:text="Başlat"
-                  android:layout_width="match_parent"
-                  android:layout_height="wrap_content"/>
-
+                  android:id="@+id/toggle"
+                  android:text="▶"/>
           </LinearLayout>
           EOF
 
-          cat > app/src/main/java/com/yks/timer/MainActivity.java <<'EOF'
-          package com.yks.timer;
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
 
-          import android.app.Activity;
-          import android.content.Intent;
-          import android.net.Uri;
-          import android.os.Build;
-          import android.os.Bundle;
-          import android.provider.Settings;
-          import android.widget.*;
-
-          public class MainActivity extends Activity {
-
-              @Override
-              protected void onCreate(Bundle b) {
-                  super.onCreate(b);
-                  setContentView(R.layout.activity_main);
-
-                  EditText min = findViewById(R.id.min);
-                  EditText sec = findViewById(R.id.sec);
-                  SeekBar size = findViewById(R.id.sizeSeek);
-
-                  findViewById(R.id.start).setOnClickListener(v -> {
-                      if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
-                          startActivity(new Intent(
-                              Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                              Uri.parse("package:" + getPackageName())));
-                          return;
-                      }
-
-                      int m = parse(min.getText().toString());
-                      int s = parse(sec.getText().toString());
-
-                      Intent i = new Intent(this, TimerService.class);
-                      i.putExtra("seconds", m * 60 + s);
-                      i.putExtra("size", size.getProgress() + 1);
-
-                      if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
-                      else startService(i);
-                  });
-              }
-
-              int parse(String s) {
-                  try { return Integer.parseInt(s); }
-                  catch(Exception e) { return 0; }
-              }
-          }
+              <Button
+                  android:id="@+id/startPause"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="Başlat"/>
+          </FrameLayout>
           EOF
 
-          cat > app/src/main/java/com/yks/timer/TimerService.java <<'EOF'
-          package com.yks.timer;
-
-          import android.app.*;
-          import android.content.*;
-          import android.graphics.*;
-          import android.media.*;
-          import android.os.*;
-          import android.view.*;
-          import android.widget.*;
-
-          public class TimerService extends Service {
-
-              WindowManager wm;
-              View overlay;
-              int total;
-              int size;
-              CountDownTimer timer;
-              View redView;
-              Handler handler = new Handler();
-              Runnable pendingResume;
-
-              @Override public IBinder onBind(Intent i){ return null; }
-
-              @Override public void onCreate(){
-                  super.onCreate();
-                  wm = (WindowManager)getSystemService(WINDOW_SERVICE);
-                  startForeground(1, notification());
-              }
-
-              @Override public int onStartCommand(Intent intent,int flags,int startId){
-                  total = intent.getIntExtra("seconds",60);
-                  size  = intent.getIntExtra("size",40);
-                  if (overlay==null) showOverlay();
-                  else updateOverlaySize();
-                  startTimer();
-                  return START_STICKY;
-              }
-
-              void showOverlay(){
-                  overlay = LayoutInflater.from(this).inflate(android.R.layout.simple_list_item_1,null);
-                  TextView tv = overlay.findViewById(android.R.id.text1);
-                  tv.setTextSize(size/2f);
-                  tv.setText("00:00");
-                  tv.setBackgroundColor(0xFFFFFFFF);
-                  tv.setPadding(20,20,20,20);
-
-                  WindowManager.LayoutParams p =
-                      new WindowManager.LayoutParams(
-                          WindowManager.LayoutParams.WRAP_CONTENT,
-                          WindowManager.LayoutParams.WRAP_CONTENT,
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                          PixelFormat.TRANSLUCENT);
-                  p.gravity = Gravity.TOP | Gravity.LEFT;
-                  p.x = 24; p.y = 120;
-
-                  overlay.setOnTouchListener(new View.OnTouchListener(){
-                      int startX, startY; float downX, downY;
-                      public boolean onTouch(View v, MotionEvent e){
-                          switch(e.getAction()){
-                              case MotionEvent.ACTION_DOWN:
-                                  startX = p.x; startY = p.y;
-                                  downX = e.getRawX(); downY = e.getRawY();
-                                  return true;
-                              case MotionEvent.ACTION_MOVE:
-                                  p.x = Math.max(0, startX + (int)(e.getRawX() - downX));
-                                  p.y = Math.max(0, startY + (int)(e.getRawY() - downY));
-                                  try { wm.updateViewLayout(overlay,p); } catch(Exception ignored){}
-                                  return true;
-                          }
-                          return false;
-                      }
-                  });
-
-                  wm.addView(overlay,p);
-              }
-
-              void updateOverlaySize(){
-                  if (overlay==null) return;
-                  TextView tv = overlay.findViewById(android.R.id.text1);
-                  tv.setTextSize(size/2f);
-              }
-
-              void startTimer(){
-                  if(timer!=null) timer.cancel();
-                  timer = new CountDownTimer(total*1000,1000){
-                      public void onTick(long ms){
-                          int s = (int)(ms/1000);
-                          TextView tv = overlay.findViewById(android.R.id.text1);
-                          tv.setText(String.format("%02d:%02d", s/60, s%60));
-                      }
-                      public void onFinish(){
-                          showRedScreen();
-                      }
-                  }.start();
-              }
-
-              void showRedScreen(){
-                  if (redView!=null) return;
-                  playDingDing();
-                  redView = new View(this);
-                  redView.setBackgroundColor(0xCCFF0000);
-                  WindowManager.LayoutParams rp =
-                      new WindowManager.LayoutParams(
-                          WindowManager.LayoutParams.MATCH_PARENT,
-                          WindowManager.LayoutParams.MATCH_PARENT,
-                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                          PixelFormat.TRANSLUCENT);
-                  wm.addView(redView, rp);
-
-                  // tap to skip -> hide immediately, wait 2s, restart
-                  redView.setOnTouchListener((v,e)->{
-                      try { wm.removeView(redView); } catch(Exception ignored) {}
-                      redView = null;
-                      if (timer!=null) timer.cancel();
-                      if (pendingResume!=null) handler.removeCallbacks(pendingResume);
-                      pendingResume = () -> { startTimer(); };
-                      handler.postDelayed(pendingResume, 2000);
-                      return true;
-                  });
-              }
-
-              void playDingDing(){
-                  try {
-                      ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_NOTIFICATION,100);
-                      tg.startTone(ToneGenerator.TONE_PROP_BEEP,140);
-                      Thread.sleep(220);
-                      tg.startTone(ToneGenerator.TONE_PROP_BEEP,140);
-                      tg.release();
-                  } catch(Exception ignored){}
-              }
-
-              Notification notification(){
-                  Notification.Builder b = new Notification.Builder(this);
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      NotificationManager nm = getSystemService(NotificationManager.class);
-                      NotificationChannel ch = new NotificationChannel("c","c", NotificationManager.IMPORTANCE_LOW);
-                      nm.createNotificationChannel(ch);
-                      b = new Notification.Builder(this, "c");
-                  }
-                  b.setContentTitle("YKS Sayaç").setSmallIcon(android.R.drawable.ic_dialog_info);
-                  return b.build();
-              }
-
-              @Override public void onDestroy(){
-                  try { if(timer!=null) timer.cancel(); } catch(Exception ignored){}
-                  try { if(overlay!=null) wm.removeView(overlay); } catch(Exception ignored){}
-                  try { if(redView!=null) wm.removeView(redView); } catch(Exception ignored){}
-              }
-          }
-          EOF
-
-          # -----------------------------
-          # Simple valid PNG for launcher (AAPT2 safe)
-          # -----------------------------
-          printf '\x89PNG\r\n\x1a\n' > app/src/main/res/mipmap-mdpi/ic_launcher.png
+          # valid PNG icon (1x1)
+          echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg== | base64 -d > app/src/main/res/mipmap-mdpi/ic_launcher.png
           cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-hdpi/ic_launcher.png
           cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png
           cp app/src/main/res/mipmap-mdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png
 
+          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
+          EOF
+
+          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.2.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+
+          cat > gradlew <<'EOF'
+          #!/bin/sh
+          exec java -jar "$(dirname "$0")/gradle/wrapper/gradle-wrapper.jar" "$@"
+          EOF
+          chmod +x gradlew
+
       - name: Build APK
-        run: gradle assembleDebug --no-daemon
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: YKS-Timer-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
