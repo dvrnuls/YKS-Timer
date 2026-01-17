@@ -254,10 +254,15 @@ jobs:
               android:id="@+id/rootOverlay"
               android:layout_width="wrap_content"
               android:layout_height="wrap_content"
-              android:clickable="true">
+              android:clickable="true"
+              android:clipChildren="false"
+              android:clipToPadding="false">
               <LinearLayout android:id="@+id/overlayContent"
                   android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:orientation="vertical" android:background="@color/overlay_bg" android:elevation="8dp">
+                  android:orientation="vertical" android:background="@color/overlay_bg" 
+                  android:elevation="8dp"
+                  android:clipChildren="false"
+                  android:clipToPadding="false">
                   <LinearLayout android:id="@+id/dragHandle"
                       android:layout_width="match_parent" android:layout_height="wrap_content"
                       android:orientation="vertical" android:padding="12dp" android:background="@color/overlay_header">
@@ -544,8 +549,7 @@ jobs:
                           baseContentH = overlayContent.getHeight();
                           baseHandleH = dragHandle.getHeight();
                           applyScale();
-                          int[] wh = getScreenSize();
-                          setPosition(wh[0] / 3, wh[1] / 3);
+                          setPosition(100, 100);
                       });
 
                       overlayView.setOnTouchListener(new View.OnTouchListener() {
@@ -555,21 +559,22 @@ jobs:
 
                           @Override
                           public boolean onTouch(View v, MotionEvent e) {
-                              if (overlayParams == null || overlayContent == null) return true;
+                              if (overlayContent == null) return true;
                               float scale = sizePercent / 100.0f;
                               if (scale <= 0f) scale = 1f;
 
-                              float contentX = overlayContent.getX();
-                              float contentY = overlayContent.getY();
+                              float contentX = overlayContent.getTranslationX();
+                              float contentY = overlayContent.getTranslationY();
+                              float localX = e.getX() - contentX;
                               float localY = e.getY() - contentY;
                               int handlePx = (baseHandleH > 0) ? (int) Math.ceil(baseHandleH * scale) : 120;
 
                               switch (e.getAction()) {
                                   case MotionEvent.ACTION_DOWN:
-                                      dragging = (localY >= 0f && localY <= handlePx);
+                                      dragging = (localX >= 0 && localX <= (baseContentW * scale) && localY >= 0f && localY <= handlePx);
                                       if (dragging) {
-                                          startX = overlayParams.x;
-                                          startY = overlayParams.y;
+                                          startX = (int) contentX;
+                                          startY = (int) contentY;
                                           startRawX = e.getRawX();
                                           startRawY = e.getRawY();
                                           return true;
@@ -644,20 +649,17 @@ jobs:
                   overlayContent.setScaleY(scale);
                   overlayContent.setPivotX(0f);
                   overlayContent.setPivotY(0f);
-
-                  overlayParams.width = baseContentW;
-                  overlayParams.height = baseContentH;
-
-                  try { wm.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
               }
 
               private void clampToScreen() {
-                  if (overlayView == null || overlayParams == null) return;
-                  setPosition(overlayParams.x, overlayParams.y);
+                  if (overlayView == null || overlayContent == null) return;
+                  float tx = overlayContent.getTranslationX();
+                  float ty = overlayContent.getTranslationY();
+                  setPosition((int)tx, (int)ty);
               }
 
               private void setPosition(int x, int y) {
-                  if (overlayView == null || overlayParams == null) return;
+                  if (overlayView == null || overlayContent == null) return;
 
                   int[] wh = getScreenSize();
                   int screenW = wh[0];
@@ -669,20 +671,16 @@ jobs:
                   int actualW = (int) Math.ceil(baseContentW * scale);
                   int actualH = (int) Math.ceil(baseContentH * scale);
 
-                  if (actualW <= 0 || actualH <= 0) {
-                      actualW = baseContentW;
-                      actualH = baseContentH;
-                  }
-
                   int minX = 0;
                   int minY = 0;
                   int maxX = Math.max(0, screenW - actualW);
                   int maxY = Math.max(0, screenH - actualH);
 
-                  overlayParams.x = clamp(x, minX, maxX);
-                  overlayParams.y = clamp(y, minY, maxY);
+                  int clampedX = clamp(x, minX, maxX);
+                  int clampedY = clamp(y, minY, maxY);
 
-                  try { wm.updateViewLayout(overlayView, overlayParams); } catch (Exception ignored) {}
+                  overlayContent.setTranslationX(clampedX);
+                  overlayContent.setTranslationY(clampedY);
               }
 
               private int[] getScreenSize() {
